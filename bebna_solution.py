@@ -495,6 +495,20 @@ class bebna:
                 self.encoder_model.compile(optimizer='adam', loss='mse')
 
 
+
+            ## Predictor.
+            ## LSTM input is number in encoded layer(256) + number of actions(8)
+            self.lstm_input_size = 256 + 8
+            self.predictor_input = tf.keras.layers.Input(shape=(self.lstm_input_size, 1,))
+            self.predictor_LSTM = tf.keras.layers.LSTM(4096, bias_initializer='glorot_uniform', stateful=True, return_state=True)
+            self.predictor_LSTM_output, self.predictor_LSTM_state_h, self.predictor_LSTM_state_c = self.predictor_LSTM(self.predictor_input)
+            self.predictor_fc_1 = tf.keras.layers.Dense(2048)(self.predictor_LSTM_output)
+            self.predictor_MDN = MDN(self.lstm_input_size, 8)
+            self.predictor_optimizer = Adam(lr=0.001)
+            self.predictor_model = tf.keras.models.Model([self.predictor_input], [self.predictor_MDN])
+            self.predictor_model.compile(loss=mdn_loss(), optimizer=self.predictor_optimizer)
+
+
             ## Actuator code.
             self.actuator_input = tf.keras.layers.Input(shape=(224, 320, 3,),
                     name='actuator_input')
@@ -516,40 +530,40 @@ class bebna:
 
             tf.initialize_all_variables().run()
 
-## MDN Stuff
+## MDN Stuff - https://github.com/yanji84/keras-mdn
 
 def get_mixture_coef(output, numComonents=24, outputDim=1):
     out_pi = output[:,:numComonents]
     out_sigma = output[:,numComonents:2*numComonents]
     out_mu = output[:,2*numComonents:]
-    out_mu = K.reshape(out_mu, [-1, numComonents, outputDim])
-    out_mu = K.permute_dimensions(out_mu,[1,0,2])
+    out_mu = tf.keras.backend.reshape(out_mu, [-1, numComonents, outputDim])
+    out_mu = tf.keras.backend.permute_dimensions(out_mu,[1,0,2])
     # use softmax to normalize pi into prob distribution
-    max_pi = K.max(out_pi, axis=1, keepdims=True)
+    max_pi = tf.keras.backend.max(out_pi, axis=1, keepdims=True)
     out_pi = out_pi - max_pi
-    out_pi = K.exp(out_pi)
-    normalize_pi = 1 / K.sum(out_pi, axis=1, keepdims=True)
+    out_pi = tf.keras.backend.exp(out_pi)
+    normalize_pi = 1 / tf.keras.backend.sum(out_pi, axis=1, keepdims=True)
     out_pi = normalize_pi * out_pi
     # use exponential to make sure sigma is positive
-    out_sigma = K.exp(out_sigma)
+    out_sigma = tf.keras.backend.exp(out_sigma)
     return out_pi, out_sigma, out_mu
 
 def tf_normal(y, mu, sigma):
     oneDivSqrtTwoPI = 1 / math.sqrt(2*math.pi)
     result = y - mu
-    result = K.permute_dimensions(result, [2,1,0])
+    result = tf.keras.backend.permute_dimensions(result, [2,1,0])
     result = result * (1 / (sigma + 1e-8))
-    result = -K.square(result)/2
-    result = K.exp(result) * (1/(sigma + 1e-8))*oneDivSqrtTwoPI
-    result = K.prod(result, axis=[0])
+    result = -tf.keras.backend.square(result)/2
+    result = tf.keras.backend.exp(result) * (1/(sigma + 1e-8))*oneDivSqrtTwoPI
+    result = tf.keras.backend.prod(result, axis=[0])
     return result
 
 def get_lossfunc(out_pi, out_sigma, out_mu, y):
     result = tf_normal(y, out_mu, out_sigma)
     result = result * out_pi
-    result = K.sum(result, axis=1, keepdims=True)
-    result = -K.log(result + 1e-8)
-    return K.mean(result)
+    result = tf.keras.backend.sum(result, axis=1, keepdims=True)
+    result = -tf.keras.backend.log(result + 1e-8)
+    return tf.keras.backend.mean(result)
 
 def mdn_loss(numComponents=24, outputDim=1):
     def loss(y, output):
@@ -562,21 +576,21 @@ class MDN(Layer):
         self.hiddenDim = 24
         self.kernelDim = kernelDim
         self.numComponents = numComponents
-        super(MixtureDensity, self).__init__(**kwargs)
+        super(MDN, self).__init__(**kwargs)
 
     def build(self, inputShape):
         self.inputDim = inputShape[1]
         self.outputDim = self.numComponents * (2+self.kernelDim)
-        self.Wh = K.variable(np.random.normal(scale=0.5,size=(self.inputDim, self.hiddenDim)))
-        self.bh = K.variable(np.random.normal(scale=0.5,size=(self.hiddenDim)))
-        self.Wo = K.variable(np.random.normal(scale=0.5,size=(self.hiddenDim, self.outputDim)))
-        self.bo = K.variable(np.random.normal(scale=0.5,size=(self.outputDim)))
+        self.Wh = tf.keras.backend.variable(np.random.normal(scale=0.5,size=(self.inputDim, self.hiddenDim)))
+        self.bh = tf.keras.backend.variable(np.random.normal(scale=0.5,size=(self.hiddenDim)))
+        self.Wo = tf.keras.backend.variable(np.random.normal(scale=0.5,size=(self.hiddenDim, self.outputDim)))
+        self.bo = tf.keras.backend.variable(np.random.normal(scale=0.5,size=(self.outputDim)))
 
         self.trainable_weights = [self.Wh,self.bh,self.Wo,self.bo]
 
     def call(self, x, mask=None):
-        hidden = K.tanh(K.dot(x, self.Wh) + self.bh)
-        output = K.dot(hidden,self.Wo) + self.bo
+        hidden = tf.keras.backend.tanh(tf.keras.backend.dot(x, self.Wh) + self.bh)
+        output = tf.keras.backend.dot(hidden,self.Wo) + self.bo
         return output
 
     def get_output_shape_for(self, inputShape):
