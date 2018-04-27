@@ -47,7 +47,7 @@ class Species:
         ## TODO: Should we add special growth attributes to each
         ## species so that we get even larger differences?
         ## If a new species is being made then there is a genome
-        ## That doesn't fit with any of the other species. This means
+        ## that doesn't fit with any of the other species. This means
         ## a new species will always start with one genome.
         self.genomes = [initial_genomes]
         self.current_size = 1
@@ -122,8 +122,15 @@ class Genome:
         self.adjusted_fitness = fitness
         self.genome_number = genome_number
 
+
+        self.active_gene_set = set()
+        self.active_gene_dict = {}
+
     def add_gene(self, gene):
         ## Add a new gene to the genome.
+        temp_len = len(self.genes)
+        self.active_gene_set.add(gene.innovation)
+        self.active_gene_dict[gene.innovation] = temp_len
         self.genes.append(gene)
 
     def sort_genes(self):
@@ -136,15 +143,32 @@ class Genome:
         self.adjusted_fitness = self.fitness / species_size
 
     def create_network(self):
+        hidden_node_set = set()
+        current_hidden_node_counter = 0
+        self.hidden_node_dict = {}
+        for gene in self.genes:
+            if gene.output_type == "HIDDEN":
+                if gene.out_node not in hidden_node_set:
+                    self.hidden_node_dict[gene.out_node] = current_hidden_node_counter
+                    current_hidden_node_counter += 1
+                hidden_node_set.add(gene.out_node)
+
+        for key, temp_node_number in enumerate(list(hidden_node_set)):
+            self.hidden_node_dict[temp_node_number] = key
+
+
+        self.num_hidden_nodes = len(hidden_node_set)
+
         self.neuron_hidden_nodes = [Node()] * self.num_hidden_nodes
         self.neuron_output_nodes = [Node()] * self.num_outputs
         for gene in self.genes:
             if gene.output_type == "HIDDEN":
-                self.neuron_hidden_nodes[gene.out_node].input_connections.append(gene)
+                self.neuron_hidden_nodes[self.hidden_node_dict[gene.out_node]].input_connections.append(gene)
             if gene.output_type == "OUTPUT":
                 self.neuron_output_nodes[gene.out_node].input_connections.append(gene)
 
     def run_network(self, inputs):
+        self.sort_genes()
         for i in range(self.num_inputs):
             self.neuron_input_nodes[i].value = inputs[i]
 
@@ -159,7 +183,7 @@ class Genome:
                         temp_bias = connection.bias
                         temp_sum += temp_in_value * temp_weight + temp_bias
                     elif connection.input_type == "HIDDEN":
-                        temp_in_value = self.neuron_hidden_nodes[temp_in_node].value
+                        temp_in_value = self.neuron_hidden_nodes[self.hidden_node_dict[temp_in_node]].value
                         temp_weight = connection.weight
                         temp_bias = connection.bias
                         temp_sum += temp_in_value * temp_weight + temp_bias
@@ -183,7 +207,7 @@ class Genome:
                         temp_bias = connection.bias
                         temp_sum += temp_in_value * temp_weight + temp_bias
                     elif connection.input_type == "HIDDEN":
-                        temp_in_value = self.neuron_hidden_nodes[temp_in_node].value
+                        temp_in_value = self.neuron_hidden_nodes[self.hidden_node_dict[temp_in_node]].value
                         temp_weight = connection.weight
                         temp_bias = connection.bias
                         temp_sum += temp_in_value * temp_weight + temp_bias
@@ -312,12 +336,16 @@ class Population:
 
         ## This is used to track each new innovation in a generation.
         ## If it has been found before, give both genes the same innovation
-        ## number. Each gene will be given as {(input, output): innovation}
+        ## number. Each gene will be given as
+        ## {(INPUT_TYPE, INPUT_VALUE, OUTPUT_TYPE, OUTPUT_VALUE): innovation}
         self.generation_innovations = {}
-        ## TODO: I think this is right? the basic genome should have
+        ## This was changed.
+        ## I think this is right? the basic genome should have
         ## num_inputs * num_outputs genes so new innovations should
         ## start past there.
-        self.global_innovation = num_inputs * num_outputs
+        ##self.global_innovation = num_inputs * num_outputs
+        ## Start at innovation zero.
+        self.global_innovation = 0
 
         ## List for keeping each species in.
         self.species_list = []
@@ -340,6 +368,12 @@ class Population:
 
         ## Number of outputs for the network.
         self.num_outputs = num_outputs
+
+        ## Current generation.
+        self.current_generation = 0
+
+        ## Highest fitness found.
+        self.highest_fitness = 0.0
 
     def new_innovation(self):
         temp_innovation = self.global_innovation
@@ -449,23 +483,65 @@ class Population:
         w = float(weight_differences_sum) / float(num_matching_genes)
         return (excess, disjoint, n, w)
 
-    def starter_genome(self):
+    def starter_genome(self, num_input_connections=5, num_output_connections=5):
         ## Returns a new basic genome.
         ## Make a new genome with the right number of inputs and outputs.
         new_genome = Genome(self.num_inputs, self.num_outputs)
+
+        '''
         ## Each basic genome will have the same innovations to fully
         ## connect them.
         temp_innovations = 0
+
         ## Fully connect the network.
         for i in range(self.num_inputs):
             for j in range(self.num_outputs):
+                ## Random weight and bias information.
                 temp_weight = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
                 temp_bias = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
                 temp_gene = Gene(i, "INPUT", j, "OUTPUT", temp_weight,
                                  temp_bias, enabled=True,
                                  temp_innovations)
+                ## This will be used in node mutation later.
+                temp_len = len(new_genome.genes)
+                new_genome.active_gene_dict[temp_innovations] = temp_len
+                new_genome.active_gene_set.add(temp_innovations)
                 new_genome.genes.append(temp_gene)
                 temp_innovations += 1
+        '''
+
+        ## Connect five random input nodes to five random output nodes.
+        if num_input_connections > self.num_inputs:
+            num_input_connections = self.num_inputs
+        if num_output_connections > self.num_outputs:
+            num_output_connections = self.num_outputs
+
+        input_values = self.generator.sample(range(0, self.num_inputs), num_input_connections)
+        output_values = self.generator.sample(range(0, self.num_outputs), num_output_connections)
+
+        for i in range(num_input_connections):
+            for j in range(num_output_connections):
+                ## Dealing with the innovation.
+                if ("INPUT", i, "OUTPUT", j) in self.generation_innovations:
+                    temp_innovation = self.generation_innovations[(input_type, input_node, output_type, output_node)]
+                else:
+                    temp_innovation = self.new_innovation()
+                    self.generation_innovations[(input_type, input_node, output_type, output_node)] = temp_innovation
+
+                ## Random weight and bias information.
+                temp_weight = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
+                temp_bias = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
+                temp_gene = Gene(i, "INPUT", j, "OUTPUT", temp_weight,
+                                 temp_bias, enabled=True,
+                                 temp_innovation)
+                ## This will be used in node mutation later.
+                temp_len = len(new_genome.genes)
+                new_genome.active_gene_dict[temp_innovation] = temp_len
+                new_genome.active_gene_set.add(temp_innovation)
+                new_genome.genes.append(temp_gene)
+                temp_innovations += 1
+
+        new_genome.num_hidden_nodes = 0
 
         return new_genome
 
@@ -579,19 +655,20 @@ class Population:
                         if random_guess > self.dissabled_chance:
                             new_gene.enabled = True
                     new_genome.append(new_gene)
+        for key, gene in enumerate(new_genome.genes):
+            if gene.enabled:
+                new_genome.active_gene_dict[gene.innovation] = key
+                new_genome.active_gene_set.add(gene.innovation)
         return new_genome
 
 
     def mutate_link(self, genome):
         ## TODO: Finish documenting.
+        ## This does not add any new nodes into the network.
         ## Connect two random nodes to each other.
         ## Check if these two are connected already.
-        ## Find the number of hidden nodes.
-        temp_counter = 0
-        for gene in genome.genes:
-            if gene.output_type == "HIDDEN":
-                temp_counter += 1
-        random_index = self.generator.randrange(0, genome.num_inputs + genome.num_outputs + temp_counter)
+        ## Only output to hidden and output nodes.
+        random_index = self.generator.randrange(0, genome.num_inputs + genome.num_outputs + genome.num_hidden_nodes)
         if random_index < genome.num_inputs:
             ## Use an input as the input node.
             input_node = random_index
@@ -606,28 +683,29 @@ class Population:
             input_node = random_index - genome.num_inputs - genome.num_outputs
             input_type = "HIDDEN"
 
-        random_index = self.generator.randrange(0, genome.num_inputs + genome.num_outputs + temp_counter)
-        if random_index < genome.num_inputs:
-            ## Use an input as the input node.
-            out_node = random_index
-            output_type = "INPUT"
-            pass
-        elif random_index < genome.num_inputs + genome.num_outputs:
+        random_index = self.generator.randrange(0, genome.num_outputs + genome.num_hidden_nodes)
+        if random_index < genome.num_outputs:
             ## Use an output as the input node.
-            output_node = random_index - genome.num_inputs
+            output_node = random_index
             output_type = "OUTPUT"
         else:
             ## Use a hidden node as the input node.
-            output_node = random_index - genome.num_inputs - genome.num_outputs
+            output_node = random_index - genome.num_outputs
             output_type = "HIDDEN"
-
-        temp_innovation = self.new_innovation
+        if (input_type, input_node, output_type, output_node) in self.generation_innovations:
+            temp_innovation = self.generation_innovations[(input_type, input_node, output_type, output_node)]
+        else:
+            temp_innovation = self.new_innovation()
+            self.generation_innovations[(input_type, input_node, output_type, output_node)] = temp_innovation
         if input_type == output_type and in_node == out_node:
             temp_reccurent = True
         else:
             temp_reccurent = False
         temp_weight = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
         temp_bias = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
+        temp_len = len(genome.genes)
+        genome.active_gene_dict[temp_innovation] = temp_len
+        genome.active_gene_set.add(temp_innovation)
         genome.genes.append(Gene(input_node, input_type,
                                  output_node, output_type,
                                  weight, bias, enabled=True,
@@ -639,18 +717,53 @@ class Population:
         ## the first of which goes from the current gene's input to
         ## a new node, the second goes from the new node to the
         ## current gene's output.
-        ## TODO: Fill this in.
+        ## TODO: Document better.
         genome_length = len(genome.genes)
 
-        ## Our current gene.
-        random_index = self.generator.randrange(0, genome_length)
-        ## Dissable this gene.
-        genome.genes[random_index].enabled = False
-        ## Create two new genes using the input and output of the current
-        ## gene.
-        ## This deals with the current input.
+        ## Check if there is even a link to split with a node.
+        if genome_length > 0:
+            ## Our current gene.
+            random_index = self.generator.randrange(0, len(genome.active_gene_set))
+            gene_innovation = list(genome.active_gene_set)[random_index]
+            old_gene = genome.genes[genome.active_gene_dict[gene_innovation]]
+            genome.active_gene_set.remove(gene_innovation)
+            genome.active_gene_dict.remove(gene_innovation)
+            ## Dissable this gene.
+            old_gene.enabled = False
+            ## Create two new genes using the input and output of the current
+            ## gene.
+            ## This deals with the current input.
+            old_input_type = old_gene.input_type
+            old_input_node = old_gene.in_node
+            old_output_type = old_gene.output_type
+            old_output_node = old_gene.out_node
 
-        pass
+            temp_recurrent = False
+
+            if (input_type, input_node, output_type, output_node) in self.generation_innovations:
+                gene_1_innovation = self.generation_innovations[(input_type, input_node, output_type, output_node)]
+            else:
+                gene_1_innovation = self.new_innovation()
+                self.generation_innovations[(input_type, input_node, output_type, output_node)] = gene_1_innovation
+            if (input_type, input_node, output_type, output_node) in self.generation_innovations:
+                gene_2_innovation = self.generation_innovations[(input_type, input_node, output_type, output_node)]
+            else:
+                gene_2_innovation = self.new_innovation()
+                self.generation_innovations[(input_type, input_node, output_type, output_node)] = gene_2_innovation
+
+            new_output_type_1 = "HIDDEN"
+            new_input_type_2 = "HIDDEN"
+
+            new_output_node = len(genome.genes)
+            new_input_node = len(genome.genes)
+
+            weight = old_gene.weight
+            bias = old_gene.bias
+
+            gene_1 = Gene(old_input_node, old_input_type, new_output_node, new_output_type_1, weight, bias,
+                 enabled=True, innovation=gene_1_innovation, temp_reccurent)
+            gene_2 = Gene(new_input_node, new_input_type_2, old_output_node, old_output_type, weight, bias,
+                 enabled=True, innovation=gene_2_innovation, temp_reccurent)
 
     def mutate_weights(self, genome):
         ## Should it be perturbed or randomly set?
@@ -681,7 +794,8 @@ class Population:
                 ## Set the gene's bias to the random value.
                 gene.bias = temp_perturb_val
 
-    def mutate_genome(self, genome, genome_number):
+    def mutate_genome(self, genome, genome_number, species_number):
+        active_genome = copy.deepcopy(genome)
         ## Should this genome be copied unchanged?
 
         ## Should this genome breed?
@@ -692,39 +806,52 @@ class Population:
             temp_interspecies_val = self.generator.random()
             if temp_interspecies_val < self.inter_species_chance:
                 ## It should be an interspecies breeding.
-                ## TODO: Find a genome outside of this genome's species.
-                pass
+                ## Find a genome outside of this genome's species.
+                temp_set = set(range(0, len(self.species_list)))
+                temp_set.remove(species_number)
+                temp_list = list(temp_set)
+                species_chosen = self.generator.choice(temp_list)
+                temp_length = len(self.species_list[species_chosen].genomes)
+                genome_chosen = self.generator.sample((0, temp_length), 1)
+                active_genome = self.breed_genomes(genome, self.species_list[species_chosen].genomes[genome_chosen])
             else:
                 ## It should not be an intraspecies breeding.
-                ## TODO: Find a genome inside this genome's species that
+                ## Find a genome inside this genome's species that
                 ## is not this genome to breed with.
-                pass
+                temp_set = set(range(0, len(self.species_list[species_number])))
+                temp_set.remove(genome_number)
+                temp_list = list(temp_set)
+                genome_chosen = self.generator.choice(temp_list)
+                active_genome = self.breed_genomes(genome, self.species_list[speciesnumber].genomes[genome_chosen])
+
 
         ## Should the genome's weights be manipulated?
         temp_weight_val = self.generator.random()
         if temp_weight_val < self.weight_manipulation_chance:
             ## The weights should be manipulated.
-            ## TODO: Call mutate weights.
-            pass
+            self.mutate_weights(active_genome)
 
 
         ## Should a new link be created?
         temp_link_val = self.generator.random()
         if temp_link_val < self.link_generation_chance:
             ## Generate a new link.
-            pass
+            self.mutate_link(active_genome)
 
         ## Should a new node be created?
         temp_node_val = self.generator.random()
         if temp_node_val < self.node_generation_chance:
             ## Generate a new node.
-            pass
+            self.mutate_node(active_genome)
 
         ## TODO: This is the function we would use to switch between
         ## growth and culling phases.
 
+        return active_genome
+
     def process_generation(self):
         ## TODO: Actually fill this out.
+        ## Clear the generation_innovations dictionary.
         ## Sort the species by their species number.
         ## For each species:
         ##   Sort the genomes by genome_number
