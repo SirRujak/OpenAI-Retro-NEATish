@@ -69,10 +69,17 @@ class Species:
     def calculate_adjusted_fitness(self):
         ## Used to calculate the adjusted fitness of the
         adjusted_sum = 0.0
+
+        max_adjusted_fitness = 0
+        max_key = 0
         ## Find the adjusted fitness of each genome then sum them.
-        for genome in genomes:
+        for key, genome in enumerate(genomes):
             genome.calculate_adjusted_fitness(self.current_size)
+            if genome.adjusted_fitness > max_adjusted_fitness:
+                max_adjusted_fitness = genome.adjusted_fitness
+                max_key = key
             adjusted_sum += genome.adjusted_fitness
+        self.current_max_genome = max_key
         self.adjusted_fitness_sum = adjusted_sum
 
         ## Check if the species made progress this generation.
@@ -168,7 +175,9 @@ class Genome:
                 self.neuron_output_nodes[gene.out_node].input_connections.append(gene)
 
     def run_network(self, inputs):
-        self.sort_genes()
+        if len(self.neuron_hidden_nodes) == 0:
+            self.sort_genes()
+            self.create_network()
         for i in range(self.num_inputs):
             self.neuron_input_nodes[i].value = inputs[i]
 
@@ -267,7 +276,8 @@ class Node:
 
 class Population:
     ## TODO: Documentation.
-    def __init__(self, num_inputs, num_outputs):
+    def __init__(self, num_inputs, num_outputs, frames_to_update=100,
+                 population_size=300):
         ## Generator with seed. If a seed is given it should be
         ## deterministic.
         if seed:
@@ -374,6 +384,23 @@ class Population:
 
         ## Highest fitness found.
         self.highest_fitness = 0.0
+
+        ## Current species being tested.
+        self.current_species = 0
+
+        ## Current genome being tested.
+        self.current_genome = 0
+
+        ## Number of frames that have been processed with a network.
+        self.current_frame = 0
+
+        ## Max number of frames to use per network run.
+        self.frames_to_update = frames_to_update
+
+        ## Value for checking if two genomes should be of the same species.
+        self.compatability_cutoff = 1
+
+        self.species_counter = 0
 
     def new_innovation(self):
         temp_innovation = self.global_innovation
@@ -482,6 +509,27 @@ class Population:
 
         w = float(weight_differences_sum) / float(num_matching_genes)
         return (excess, disjoint, n, w)
+
+    def add_genome_to_species(self, genome):
+        for key, species in self.species_list:
+            ## TODO: Make sure to delete species if they don't have any genomes.
+            for species in self.species_list:
+                compatability, err = self.calculate_compatibility(species.representative, genome)
+                if err is not None:
+                    return err
+                else:
+                    if compatability > self.compatability_cutoff:
+                        species.genomes.append(genome)
+                        return None
+            ## If we were unable to find one. Create a new species and add it.
+            self.species_list.append(Species(genome, self.species_counter))
+            self.species_counter += 1
+            return None
+
+    def generate_initial_population(self):
+        ## TODO: Do things!
+        for i in range(self.population_size):
+            self.add_genome_to_species(self.starter_genome)
 
     def starter_genome(self, num_input_connections=5, num_output_connections=5):
         ## Returns a new basic genome.
@@ -815,7 +863,7 @@ class Population:
                 genome_chosen = self.generator.sample((0, temp_length), 1)
                 active_genome = self.breed_genomes(genome, self.species_list[species_chosen].genomes[genome_chosen])
             else:
-                ## It should not be an intraspecies breeding.
+                ## It should be an intraspecies breeding.
                 ## Find a genome inside this genome's species that
                 ## is not this genome to breed with.
                 temp_set = set(range(0, len(self.species_list[species_number])))
@@ -849,20 +897,82 @@ class Population:
 
         return active_genome
 
-    def process_generation(self):
+    def process_new_generation(self):
         ## TODO: Actually fill this out.
         ## Clear the generation_innovations dictionary.
+        self.generation_innovations = {}
         ## Sort the species by their species number.
-        ## For each species:
-        ##   Sort the genomes by genome_number
-        ##   For each genome in the species
-        ##     Build the network for the current genome
-        ##     Run simulator for one run.
-        ##     **Remember to do something about novelty search**
-        ##     Run fitness information.
         ## For each species.
-        ##   Calculate the adjusted fitness.
-        ## Resample based on adjusted fitness.
-        ##   For i in range of number of genomes to reproduce:
-        ##     randomly select a genome in the species and reproduce it
-        pass
+        species_to_keep = set()
+        num_genomes_created = 0
+        total_adjusted_fitness = 0
+        for key, species in enumerate(self.species_list):
+            ##   Calculate the adjusted fitness.
+            species.calculate_adjusted_fitness()
+            total_adjusted_fitness += species.adjusted_fitness_sum
+            species.remove_weak_genomes()
+            ## Check if the species has passed the stagnant limit.
+            if species.stagnant_time < self.stagnant_time:
+                species_to_remove.add(key)
+        old_species = self.species_list
+        self.species_list = []
+
+        for key, species in enumerate(old_species):
+            if key not in species_to_remove:
+                temp_species = Species(
+                        copy.deepcopy(species.genomes[species.current_max_genome]),
+                        species.species_number)
+                self.species_list.append(temp_species)
+                num_genomes_created += 1
+
+
+        for species_key, species in enumerate(old_species):
+            if species_key not in species_to_remove:
+                percent_allocated = species.adjusted_fitness_sum // total_adjusted_fitness
+                genomes_allocated = percent_allocated * self.population_size
+
+                ## Generate the new genomes for this species.
+                for i in range(genomes_allocated - 1):
+                    ## Select a random genome to mutate.
+                    genome_key = self.generator.randint(0, len(species.genomes))
+                    genome = species.genomes[genome_key]
+                    self.add_genome_to_species(self.mutate_genome(genome,
+                            genome_key, species_key))
+                    num_genomes_created += 1
+                pass
+        ## Create random genomes to replace the ones lost.
+
+        num_genomes_left = self.population_size - num_genomes_created
+
+        for i in range(num_genomes_left):
+            ## Add random genome to species.
+            random_genome = self.starter_genome()
+            self.add_genome_to_species(random_genome)
+        self.current_generation += 1
+
+    def process_data(self, input_data, last_reward):
+        ## Take data in.
+        ## Check if it is time to create a new generation.
+        ## Also, track current location in the population.
+        if self.current_frame = self.frames_to_update:
+            if self.current_species == len(self.species_list) - 1:
+                if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
+                    ## We need to create a new generation.
+                    self.current_species = 0
+                    self.current_genome = 0
+                    ## Create new generation.
+                    self.process_new_generation()
+            else:
+                ## Add last reward to the current genome.
+                self.species_list[self.current_species].genomes[self.current_genome].fitness = last_reward
+                if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
+                    self.current_species += 1
+                    self.current_genome = 0
+                else:
+                    self.current_genome += 1
+            self.current_frame = 0
+
+        ## Process the data.
+        output_data = self.species_list[self.current_species].genomes[self.current_genome].run_network(input_data)
+        ## Return the output of the current run.
+        return output_data
