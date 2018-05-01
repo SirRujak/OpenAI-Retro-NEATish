@@ -22,7 +22,7 @@ class Activations:
         ## This is just calculating a sigmoid:
         ## y = 1/(1 + e^(-ax))
         power = -4.9 * input_val
-        bottom = 1.0 + exp(power)
+        bottom = 1.0 + math.exp(power)
         result = 1.0 / bottom
         return result
 
@@ -49,7 +49,7 @@ class Species:
         ## If a new species is being made then there is a genome
         ## that doesn't fit with any of the other species. This means
         ## a new species will always start with one genome.
-        self.genomes = [initial_genomes]
+        self.genomes = [initial_genome]
         self.current_size = 1
         ## The first genome will always be the representative of this
         ## species.
@@ -101,21 +101,23 @@ class Species:
 
 class Genome:
     ## TODO: Documentation.
-    def __init__(self, num_inputs=0, num_outputs=0, genes=[]
+    def __init__(self, num_inputs=0, num_outputs=0, genes=[],
                  neuron_input_nodes=[], neuron_output_nodes=[],
-                 neuron_hidden_nodes=[], fitness=0.0 species=None,
+                 neuron_hidden_nodes=[], fitness=0.0, species=None,
                  genome_number=0):
         ## TODO: Add some documentation here.
         self.activations = Activations()
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
         self.genes = genes
-        if len(self.neuron_input_nodes) != 0:
+        self.neuron_input_nodes = []
+        self.neuron_output_nodes = []
+        if len(neuron_input_nodes) != 0:
             self.neuron_input_nodes = neuron_input_nodes
         else:
             for i in range(num_inputs):
                 self.neuron_input_nodes.append(Node())
-        if len(self.neuron_output_nodes) != 0:
+        if len(neuron_output_nodes) != 0:
             self.neuron_output_nodes = neuron_output_nodes
         else:
             for i in range(num_outputs):
@@ -170,9 +172,9 @@ class Genome:
         self.neuron_output_nodes = [Node()] * self.num_outputs
         for gene in self.genes:
             if gene.output_type == "HIDDEN":
-                self.neuron_hidden_nodes[self.hidden_node_dict[gene.out_node]].input_connections.append(gene)
+                self.neuron_hidden_nodes[self.hidden_node_dict[gene.out_node]].input_connections.add(gene)
             if gene.output_type == "OUTPUT":
-                self.neuron_output_nodes[gene.out_node].input_connections.append(gene)
+                self.neuron_output_nodes[gene.out_node].input_connections.add(gene)
 
     def run_network(self, inputs):
         if len(self.neuron_hidden_nodes) == 0:
@@ -205,7 +207,7 @@ class Genome:
             node.value = self.activations.base_sigmoid(temp_sum)
 
         output = [0.0] * self.num_outputs
-        for key, node in enumerate(self.output_nodes):
+        for key, node in enumerate(self.neuron_output_nodes):
             temp_sum = 0.0
             for connection in node.input_connections:
                 if connection.enabled:
@@ -276,7 +278,7 @@ class Node:
 
 class Population:
     ## TODO: Documentation.
-    def __init__(self, num_inputs, num_outputs, frames_to_update=100,
+    def __init__(self, num_inputs, num_outputs, seed=None, frames_to_update=100,
                  population_size=300):
         ## Generator with seed. If a seed is given it should be
         ## deterministic.
@@ -287,6 +289,9 @@ class Population:
         else:
             self.seed = None
             self.generator = random.Random()
+
+        ## Set the population size.
+        self.population_size = population_size
         ## Constants used to separate genomes into species.
         ## Constant for excess genes.
         self.c1 = 1.0
@@ -402,6 +407,15 @@ class Population:
 
         self.species_counter = 0
 
+        ## Used to check if the current generation has been fully processed.
+        self.generation_processed = False
+
+    def setup(self):
+        err = self.generate_initial_population()
+        self.generation_processed = False
+        if err is not None:
+            print("Error setting up population. {}".format(err))
+
     def new_innovation(self):
         temp_innovation = self.global_innovation
         self.global_innovation += 1
@@ -422,7 +436,7 @@ class Population:
         ## Calculate compatability between two genes and return it.
         compatability_distance = ((self.c1 * excess + self.c2 * disjoint) \
             / N) + self.c3 * W
-        return (compatibility_distance, None)
+        return (compatability_distance, None)
 
     def calculate_excess_and_disjoint(self, genome_1, genome_2):
         ## We can assume here that there will be at least one gene
@@ -461,7 +475,7 @@ class Population:
                 if genome_1.genes[current_position_1].innovation != genome_2.genes[current_position_2].innovation:
                     excess += 1
             elif (genome_1.genes[current_position_1].innovation ==
-            genome2.genes[current_position_2].innovation):
+            genome_2.genes[current_position_2].innovation):
                 ## If the current innovations are the same we need to
                 ## add that information to the weight differences and
                 ## matching variables.
@@ -477,7 +491,7 @@ class Population:
                     current_position_2 += 1
 
             elif (genome_1.genes[current_position_1].innovation >
-            genome2.genes[current_position_2].innovation):
+            genome_2.genes[current_position_2].innovation):
                 ## If we are already at the end of genome 2 increment
                 ## the place in genome 2 and say the current comparison
                 ## is an excess.
@@ -493,7 +507,7 @@ class Population:
 
 
             elif (genome_1.genes[current_position_1].innovation <
-            genome2.genes[current_position_2].innovation)
+            genome_2.genes[current_position_2].innovation):
                 ## If we are already at the end of genome 1 increment
                 ## the place in genome 2 and say the current comparison
                 ## is an excess.
@@ -511,30 +525,34 @@ class Population:
         return (excess, disjoint, n, w)
 
     def add_genome_to_species(self, genome):
-        for key, species in self.species_list:
-            ## TODO: Make sure to delete species if they don't have any genomes.
-            for species in self.species_list:
-                compatability, err = self.calculate_compatibility(species.representative, genome)
-                if err is not None:
-                    return err
-                else:
-                    if compatability > self.compatability_cutoff:
-                        species.genomes.append(genome)
-                        return None
-            ## If we were unable to find one. Create a new species and add it.
-            self.species_list.append(Species(genome, self.species_counter))
-            self.species_counter += 1
-            return None
+        ## Returns error.
+        ## TODO: Make sure to delete species if they don't have any genomes.
+        for species in self.species_list:
+            ##print("Type of representative: {}".format(type(species.representative)))
+            compatability, err = self.calculate_compatibility(species.representative, genome)
+            if err is not None:
+                return err
+            else:
+                if compatability > self.compatability_cutoff:
+                    species.genomes.append(genome)
+                    return None
+        ## If we were unable to find one. Create a new species and add it.
+        ##print("Genome type: {}".format(type(genome)))
+        self.species_list.append(Species(genome, self.species_counter))
+        self.species_counter += 1
+        return None
 
     def generate_initial_population(self):
-        ## TODO: Do things!
+        ## Returns error.
         for i in range(self.population_size):
-            self.add_genome_to_species(self.starter_genome)
+            err = self.add_genome_to_species(self.starter_genome())
+        return err
 
     def starter_genome(self, num_input_connections=5, num_output_connections=5):
         ## Returns a new basic genome.
         ## Make a new genome with the right number of inputs and outputs.
         new_genome = Genome(self.num_inputs, self.num_outputs)
+        ##print("Genome type: {}".format(type(new_genome)))
 
         '''
         ## Each basic genome will have the same innovations to fully
@@ -567,8 +585,11 @@ class Population:
         input_values = self.generator.sample(range(0, self.num_inputs), num_input_connections)
         output_values = self.generator.sample(range(0, self.num_outputs), num_output_connections)
 
-        for i in range(num_input_connections):
-            for j in range(num_output_connections):
+        input_type = "INPUT"
+        output_type = "OUTPUT"
+
+        for input_node in range(num_input_connections):
+            for output_node in range(num_output_connections):
                 ## Dealing with the innovation.
                 if ("INPUT", i, "OUTPUT", j) in self.generation_innovations:
                     temp_innovation = self.generation_innovations[(input_type, input_node, output_type, output_node)]
@@ -579,15 +600,14 @@ class Population:
                 ## Random weight and bias information.
                 temp_weight = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
                 temp_bias = (self.generator.random() - 1.0) * 2.0 * self.max_weight_replaced
-                temp_gene = Gene(i, "INPUT", j, "OUTPUT", temp_weight,
+                temp_gene = Gene(input_node, "INPUT", output_node, "OUTPUT", temp_weight,
                                  temp_bias, enabled=True,
-                                 temp_innovation)
+                                 innovation=temp_innovation)
                 ## This will be used in node mutation later.
                 temp_len = len(new_genome.genes)
                 new_genome.active_gene_dict[temp_innovation] = temp_len
                 new_genome.active_gene_set.add(temp_innovation)
                 new_genome.genes.append(temp_gene)
-                temp_innovations += 1
 
         new_genome.num_hidden_nodes = 0
 
@@ -618,7 +638,7 @@ class Population:
                     random_guess = self.generator.random()
                     if random_guess < 0.5:
                         ## Take from the first.
-                        new_gene = copy.deepcopy(gene))
+                        new_gene = copy.deepcopy(gene)
                     else:
                         ## Take from the second.
                         new_gene = copy.deepcopy(genome_2.genes[genome_2_dict[gene.innovation]])
@@ -758,7 +778,7 @@ class Population:
                                  output_node, output_type,
                                  weight, bias, enabled=True,
                                  innovation=temp_innovation,
-                                 temp_reccurent))
+                                 reccurent=temp_reccurent))
 
     def mutate_node(self, genome):
         ## Take one current gene. Dissable it. Create two new genes
@@ -809,15 +829,15 @@ class Population:
             bias = old_gene.bias
 
             gene_1 = Gene(old_input_node, old_input_type, new_output_node, new_output_type_1, weight, bias,
-                 enabled=True, innovation=gene_1_innovation, temp_reccurent)
+                 enabled=True, innovation=gene_1_innovation, reccurent=temp_reccurent)
             gene_2 = Gene(new_input_node, new_input_type_2, old_output_node, old_output_type, weight, bias,
-                 enabled=True, innovation=gene_2_innovation, temp_reccurent)
+                 enabled=True, innovation=gene_2_innovation, reccurent=temp_reccurent)
 
     def mutate_weights(self, genome):
         ## Should it be perturbed or randomly set?
         temp_perturb_val = self.generator.random()
         ## Check if we are updating or setting weight and bias values.
-        if temp_perturb_val < self.weight_perturbation_chance
+        if temp_perturb_val < self.weight_perturbation_chance:
             ## We should perturb.
             for key, gene in enumerate(genome.genes):
                 ## For updating the weight.
@@ -898,7 +918,7 @@ class Population:
         return active_genome
 
     def process_new_generation(self):
-        ## TODO: Actually fill this out.
+        ## Returns error.
         ## Clear the generation_innovations dictionary.
         self.generation_innovations = {}
         ## Sort the species by their species number.
@@ -936,7 +956,7 @@ class Population:
                     ## Select a random genome to mutate.
                     genome_key = self.generator.randint(0, len(species.genomes))
                     genome = species.genomes[genome_key]
-                    self.add_genome_to_species(self.mutate_genome(genome,
+                    err = self.add_genome_to_species(self.mutate_genome(genome,
                             genome_key, species_key))
                     num_genomes_created += 1
                 pass
@@ -947,24 +967,39 @@ class Population:
         for i in range(num_genomes_left):
             ## Add random genome to species.
             random_genome = self.starter_genome()
-            self.add_genome_to_species(random_genome)
+            err = self.add_genome_to_species(random_genome)
         self.current_generation += 1
 
-    def process_data(self, input_data, last_reward):
+        return err
+
+    def process_data(self, input_data):
         ## Take data in.
+
+        ## Process the data.
+        ##print("species list length: {}, genome length: {}".format(len(self.species_list), 0))
+        output_data = self.species_list[self.current_species].genomes[self.current_genome].run_network(input_data)
+
+        ## Return the output of the current run.
+        return output_data
+
+    def update_position(self):
         ## Check if it is time to create a new generation.
         ## Also, track current location in the population.
-        if self.current_frame = self.frames_to_update:
+
+        if self.current_frame == self.frames_to_update:
             if self.current_species == len(self.species_list) - 1:
                 if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
+                    #self.species_list[self.current_species].genomes[self.current_genome].fitness = last_reward
                     ## We need to create a new generation.
                     self.current_species = 0
                     self.current_genome = 0
                     ## Create new generation.
-                    self.process_new_generation()
+                    ##self.process_new_generation()
+                    self.generation_processed = True
+
             else:
                 ## Add last reward to the current genome.
-                self.species_list[self.current_species].genomes[self.current_genome].fitness = last_reward
+                #self.species_list[self.current_species].genomes[self.current_genome].fitness = last_reward
                 if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
                     self.current_species += 1
                     self.current_genome = 0
@@ -972,7 +1007,28 @@ class Population:
                     self.current_genome += 1
             self.current_frame = 0
 
-        ## Process the data.
-        output_data = self.species_list[self.current_species].genomes[self.current_genome].run_network(input_data)
-        ## Return the output of the current run.
-        return output_data
+
+    def apply_reward(self, reward):
+        self.species_list[self.current_species].genomes[self.current_genome].fitness = reward
+
+if __name__ == '__main__':
+    ## Generate XOR data.
+    inputs = []
+    for i in range(2):
+        for j in range(2):
+            inputs.append([i, j])
+
+    test_population = Population(2, 1, 42, len(inputs))
+    test_population.setup()
+    reward = 0
+    for i in range(3000):
+        temp_index = i % len(inputs)
+        temp_output = test_population.process_data(inputs[temp_index])[0]
+        actual_output = inputs[temp_index][0] ^ inputs[temp_index][1]
+        error =  ((temp_output - actual_output)*(temp_output - actual_output))
+        print("Prediction: {}.\nActual: {}\nError: {}".format(temp_output, actual_output, error))
+        test_population.apply_reward(error)
+        test_population.update_position()
+
+        if test_population.generation_processed:
+            test_population.process_new_generation()
