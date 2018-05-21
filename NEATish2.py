@@ -85,6 +85,8 @@ class Species:
             adjusted_sum += genome.adjusted_fitness
         self.current_max_genome = max_key
         self.adjusted_fitness_sum = adjusted_sum
+        #print("Adjusted fitness sum: ", self.adjusted_fitness_sum)
+        #input("...")
 
         ## Check if the species made progress this generation.
         if self.adjusted_fitness_sum > self.maximum_adjusted_fitness:
@@ -93,17 +95,22 @@ class Species:
             self.stagnant_time += 1
 
     def remove_weak_genomes(self, all_but_one=False):
+        self.genomes.sort(key=lambda genome: genome.fitness, reverse=True)
+        '''
         genome_fitness_data = []
         for key, genome in enumerate(self.genomes):
             genome_fitness_data.append({'key':key, 'fitness':genome.fitness})
         genome_fitness_data.sort(key=lambda data: data['fitness'])
-
-        if not all_but_one:
+        '''
+        if not all_but_one and len(self.genomes) > 1:
             num_to_keep = math.ceil(len(self.genomes)//2)
         else:
             num_to_keep = 1
+        self.genomes = self.genomes[:num_to_keep]
 
+        '''
         genome_fitness_data = genome_fitness_data[:num_to_keep]
+        '''
         '''
         self.genomes.sort(key=lambda genome: genome.adjusted_fitness, reverse=False)
         if not all_but_one:
@@ -114,7 +121,7 @@ class Species:
         self.genomes = self.genomes[:num_to_keep]
         '''
 
-        return genome_fitness_data
+        #return genome_fitness_data
 
 
 
@@ -185,14 +192,15 @@ class Genome:
     def calculate_adjusted_fitness(self, species_size):
         ## The adjusted fitness is the fitness of the genome divided
         ## by the number of members in the species it belongs to.
-        self.adjusted_fitness = self.fitness / species_size
+        self.adjusted_fitness = self.fitness / float(species_size)
+        #print("Genome fitness: ", self.fitness, self.adjusted_fitness, species_size)
 
     def create_network(self):
         hidden_node_set = set()
         current_hidden_node_counter = 0
         self.hidden_node_dict = {}
         for gene in self.genes:
-            print("Gene in_node:{}, in_type:{}, out_node:{}, out_type:{}, weight:{}, bias:{}".format(gene.in_node, gene.input_type, gene.out_node, gene.output_type, gene.weight, gene.innovation))
+            #print("Gene in_node:{}, in_type:{}, out_node:{}, out_type:{}, weight:{}, bias:{}".format(gene.in_node, gene.input_type, gene.out_node, gene.output_type, gene.weight, gene.innovation))
 
             if gene.output_type == "HIDDEN":
 
@@ -222,8 +230,9 @@ class Genome:
             #print("Creation test.")
             self.sort_genes()
             self.create_network()
-        for i in range(self.num_inputs):
+        for i in range(self.num_inputs - 1):
             self.neuron_input_nodes[i].value = inputs[i]
+        self.neuron_input_nodes[-1].value = 1.0
 
         for node in self.neuron_hidden_nodes:
             temp_sum = 0.0
@@ -233,17 +242,20 @@ class Genome:
                     if connection.input_type == "INPUT":
                         temp_in_value = self.neuron_input_nodes[temp_in_node].value
                         temp_weight = connection.weight
-                        temp_bias = connection.bias
+                        temp_bias = 0
+                        #temp_bias = connection.bias
                         temp_sum += temp_in_value * temp_weight + temp_bias
                     elif connection.input_type == "HIDDEN" and temp_in_node in self.hidden_node_dict:
                         temp_in_value = self.neuron_hidden_nodes[self.hidden_node_dict[temp_in_node]].value
                         temp_weight = connection.weight
-                        temp_bias = connection.bias
+                        temp_bias = 0
+                        #temp_bias = connection.bias
                         temp_sum += temp_in_value * temp_weight + temp_bias
                     elif connection.input_type == "OUTPUT":
                         temp_in_value = self.neuron_output_nodes[temp_in_node].value
                         temp_weight = connection.weight
-                        temp_bias = connection.bias
+                        temp_bias = 0
+                        #temp_bias = connection.bias
                         temp_sum += temp_in_value * temp_weight + temp_bias
 
             node.value = self.activations.base_sigmoid(temp_sum)
@@ -307,8 +319,8 @@ class Gene:
         self.recurrent = recurrent
 
     def printable(self):
-        return "into:{}, output:{}, weight:{}, bias:{}, enabled:{}".format(
-            self.in_node, self.out_node, self.weight, self.bias, self.enabled
+        return "into:{}, in_type{}, output:{}, out_type:{} weight:{}, bias:{}, enabled:{}".format(
+            self.in_node, self.input_type, self.out_node, self.output_type, self.weight, self.bias, self.enabled
         )
 
 class Node:
@@ -353,11 +365,11 @@ class Population:
         self.c2 = 1.0
         ## By increasing this the system accounts for more variations
         ## in gene weights
-        self.c3 = 0.4 ## 3.0 for large populations
+        self.c3 = 0.3 ## 3.0 for large populations
 
         ## Constant for acceptable degree of differentiation between
         ## species
-        self.del_t = 3.0 ## 4.0 for large populations
+        self.del_t = 0.3 ## 4.0 for large populations
 
         ## If species have been stagnant for this amount of time
         ## that species is no longer allowed to reproduce. Stagnant
@@ -379,7 +391,7 @@ class Population:
 
         ## If the gene is disabled in either parent there is this chance
         ## that the child will also have the gene disabled.
-        self.disable_chance = 0.75
+        self.disable_chance = 0.95
 
         ## This is the chance that the genome will mutate without any
         ## crossover.
@@ -397,6 +409,8 @@ class Population:
         ## was found to be more important than node generation in the
         ## original paper.
         self.link_generation_chance = 0.05
+
+        self.link_deletion_chance = 0.05
 
         ## TODO: Should we add in the ability to do contraction
         ## manipulations? We would need something for keeping track
@@ -424,17 +438,17 @@ class Population:
         self.total_adjusted_fitness = 0.0
 
         ## The maximum amount a mutation can perturb a weight.
-        self.max_weight_perturbation = 0.1
+        self.max_weight_perturbation = 0.5
         ## The maximum amount a mutation can perturb a bias.
-        self.max_bias_perturbation = 0.01
+        self.max_bias_perturbation = 1.0
 
         ## The maximum value of a replaced weight.
         self.max_weight_replaced = 1.0
         ## The maximum value of a replaced bias.
-        self.max_bias_replaced = 1.0
+        self.max_bias_replaced = 0.5
 
         ## Number of inputs to the network.
-        self.num_inputs = num_inputs
+        self.num_inputs = num_inputs + 1
 
         ## Number of outputs for the network.
         self.num_outputs = num_outputs
@@ -456,9 +470,6 @@ class Population:
 
         ## Max number of frames to use per network run.
         self.frames_to_update = frames_to_update
-
-        ## Value for checking if two genomes should be of the same species.
-        self.compatability_cutoff = 1
 
         self.species_counter = 0
 
@@ -502,9 +513,13 @@ class Population:
         genome_2.sort_genes()
         ## Calculate the variables necissary to calculate compatability.
         excess, disjoint, N, W = self.calculate_excess_and_disjoint(genome_1, genome_2)
+        #print("excess:{} disjoint:{} N:{} W:{}".format(excess, disjoint, N, W))
         ## Calculate compatability between two genes and return it.
-        compatability_distance = ((self.c1 * excess + self.c2 * disjoint) \
-            / N) + self.c3 * W
+        if N > 0:
+            compatability_distance = (self.c1 * excess + self.c2 * disjoint) / N# + self.c3 * W
+        else:
+            compatability_distance = (self.c1 * excess + self.c2 * disjoint)# + self.c3 * W
+
         return (compatability_distance, None)
 
     def calculate_excess_and_disjoint(self, genome_1, genome_2):
@@ -547,6 +562,9 @@ class Population:
                 else:
                     ## Otherwise we have one more matching gene.
                     num_matching_genes += 1
+                    weight_differences_sum += \
+                        abs(genome_1.genes[current_position_1].weight +\
+                        genome_2.genes[current_position_2].weight)
             elif (genome_1.genes[current_position_1].innovation ==
             genome_2.genes[current_position_2].innovation):
                 ## If the current innovations are the same we need to
@@ -599,7 +617,7 @@ class Population:
 
     def add_genome_to_species(self, genome):
         ## Returns error.
-        ## TODO: Make sure to delete species if they don't have any genomes.
+        ## TODO: Make sure to delete species if they don't have any genomes.num_input
         for species in self.species_list:
             ##print("Type of representative: {}".format(type(species.representative)))
             compatability, err = self.calculate_compatibility(species.representative, genome)
@@ -609,9 +627,10 @@ class Population:
             else:
 
                 #print("compatability: {}.".format(compatability))
-                if compatability < self.compatability_cutoff:
+                if compatability < self.del_t:
                     #print("compatability: {}.".format(compatability))
                     species.genomes.append(genome)
+                    species.current_size += 1
                     return None
         ## If we were unable to find one. Create a new species and add it.
         ##print("Genome type: {}".format(type(genome)))
@@ -827,7 +846,20 @@ class Population:
             if gene.enabled:
                 new_genome.active_gene_dict[gene.innovation] = key
                 new_genome.active_gene_set.add(gene.innovation)
+
+        ## Add in the gene keys to the new genome.
+        for gene in new_genome.genes:
+            input_type = gene.input_type
+            input_node = gene.in_node
+            output_type = gene.output_type
+            output_node = gene.out_node
+            new_genome.links.add((input_type, input_node, output_type, output_node))
+
         return new_genome
+
+    def delete_link(self, genome):
+        random_index = self.generator.randrange(0, len(genome.genes))
+        genome.genes[random_index].enabled = False
 
 
     def mutate_link(self, genome):
@@ -863,7 +895,7 @@ class Population:
             output_type = "HIDDEN"
 
         if (input_type, input_node, output_type, output_node) not in genome.links:
-            print("Links: ",genome.links)
+            #print("Links: ",genome.links)
             if (input_type, input_node, output_type, output_node) in self.generation_innovations:
                 temp_innovation = self.generation_innovations[(input_type, input_node, output_type, output_node)]
             else:
@@ -899,6 +931,9 @@ class Population:
             ## Our current gene.
             random_index = self.generator.randrange(0, len(genome.active_gene_set))
             gene_innovation = list(genome.active_gene_set)[random_index]
+            #print("gene_inovation", gene_innovation)
+            #print(genome.active_gene_dict)
+            #print(genome.genes)
             old_gene = genome.genes[genome.active_gene_dict[gene_innovation]]
             genome.active_gene_set.remove(gene_innovation)
             del genome.active_gene_dict[gene_innovation]
@@ -988,7 +1023,7 @@ class Population:
             ## It should breed
             ## Should it mate with a different species?
             temp_interspecies_val = self.generator.random()
-            if temp_interspecies_val < self.inter_species_chance:
+            if temp_interspecies_val < self.inter_species_chance and len(self.species_list) > 1:
                 ## It should be an interspecies breeding.
                 ## Find a genome outside of this genome's species.
                 temp_set = set(range(0, len(self.species_list)))
@@ -1001,8 +1036,8 @@ class Population:
                     genome_chosen = self.generator.sample((0, temp_length - 1), 1)[0]
                 else:
                     genome_chosen = 0
-                print("genome chosen", genome_chosen)
-                print("species size", len(self.species_list[species_chosen].genomes))
+                #print("genome chosen", genome_chosen)
+                #print("species size", len(self.species_list[species_chosen].genomes))
                 active_genome = self.breed_genomes(genome, self.species_list[species_chosen].genomes[genome_chosen])
             else:
                 ## It should be an intraspecies breeding.
@@ -1027,18 +1062,25 @@ class Population:
             self.mutate_weights(active_genome)
 
 
-        ## Should a new link be created?
+        ## Should a new link be created or deleted?
         temp_link_val = self.generator.random()
         #print("test")
+
+        if temp_link_val < self.link_deletion_chance:
+            self.delete_link(active_genome)
+
+
+        temp_link_val = self.generator.random()
+
         if temp_link_val < self.link_generation_chance:
-            print("Generate link.")
+            #print("Generate link.")
             ## Generate a new link.
             self.mutate_link(active_genome)
 
         ## Should a new node be created?
         temp_node_val = self.generator.random()
         if temp_node_val < self.node_generation_chance:
-            print("Generate node.")
+            #print("Generate node.")
             ## Generate a new node.
             self.mutate_node(active_genome)
 
@@ -1048,6 +1090,86 @@ class Population:
         return active_genome
 
     def process_new_generation(self):
+        ## Clear the generation_innovations dictionary.
+        self.generation_innovations = {}
+
+        keep_species_list = []
+        total_adjusted_fitness = 0.0
+
+        ## Step through each species and decide which ones to keep.
+        for key, species in enumerate(self.species_list):
+            if species.stagnant_time < self.stagnant_time:
+                species.remove_weak_genomes()
+                species.calculate_adjusted_fitness()
+                keep_species_list.append(species)
+
+        keep_species_list.sort(key=lambda data: data.adjusted_fitness_sum, reverse=True)
+        ## Cull down to the best
+        if len(keep_species_list) >= self.max_num_species:
+            keep_species_list = keep_species_list[:self.max_num_species]
+
+        self.species_list = keep_species_list
+
+        for species in self.species_list:
+            total_adjusted_fitness += species.adjusted_fitness_sum
+        #print(total_adjusted_fitness)
+        #print(len(self.species_list))
+        #input("total_adjusted_fitness")
+
+        num_genomes_created = 0
+        new_genomes = []
+        new_species_list = []
+
+        for species_key, species in enumerate(self.species_list):
+            percent_allocated = float(species.adjusted_fitness_sum) / float(total_adjusted_fitness)
+            genomes_allocated = math.floor(percent_allocated * self.population_size)
+            #print(percent_allocated, genomes_allocated)
+            #input("percent and genomes allocated")
+            if genomes_allocated > 0:
+                ## Actually produce some offspring.
+                if genomes_allocated > 1:
+                    ## Make sure to keep the best genome.
+                    genomes_allocated -= 1
+                    temp_genome = species.genomes[0]
+                    ## TODO: Use this to add the old species to the new set.
+                    new_species_list.append(Species(temp_genome, species.species_number))
+                    ##new_genomes.append(copy.deepcopy(temp_genome))
+                    num_genomes_created += 1
+                for _ in range(genomes_allocated):
+                    if len(species.genomes) > 1:
+                        genome_key = self.generator.randint(0, len(species.genomes) - 1)
+                        old_genome = species.genomes[genome_key]
+
+                        new_genome = self.mutate_genome(old_genome, genome_key, species_key)
+                        num_genomes_created += 1
+                        new_genomes.append(new_genome)
+        #print("New species list size: ", len(new_species_list))
+        #input("...")
+
+        if num_genomes_created < self.population_size:
+            for _ in range(self.population_size - num_genomes_created):
+                if len(self.species_list) == 1:
+                    species_key = 0
+                else:
+                    species_key = self.generator.randint(0, len(self.species_list) - 1)
+                if len(self.species_list[species_key].genomes) == 1:
+                    genome_key = 0
+                else:
+                    genome_key = self.generator.randint(0, len(self.species_list[species_key].genomes) - 1)
+                old_genome = self.species_list[species_key].genomes[genome_key]
+                new_genome = self.mutate_genome(old_genome, genome_key, species_key)
+                new_genomes.append(new_genome)
+
+        self.species_list = new_species_list
+
+        for genome in new_genomes:
+            err = self.add_genome_to_species(genome)
+            if err is not None:
+                return err
+        #print("New spcies list size: ", len(self.species_list))
+        #input("...")
+
+    def process_new_generation2(self):
         ## Returns error.
         ## Clear the generation_innovations dictionary.
         self.generation_innovations = {}
@@ -1063,9 +1185,10 @@ class Population:
             #print(species.adjusted_fitness_sum)
             total_adjusted_fitness += species.adjusted_fitness_sum
             ## Check if the species has passed the stagnant limit.
-        self.species_list.sort(key=lambda data: data.adjusted_fitness_sum)
+        self.species_list.sort(key=lambda data: data.adjusted_fitness_sum, reverse=True)
         for key, species in enumerate(self.species_list):
-            if species.stagnant_time < self.stagnant_time and species.adjusted_fitness_sum > self.highest_fitness / 2 and len(species_to_keep) < self.max_num_species:
+            #if species.stagnant_time < self.stagnant_time and species.adjusted_fitness_sum > self.highest_fitness / 2 and len(species_to_keep) < self.max_num_species:
+            if species.stagnant_time < self.stagnant_time and len(species_to_keep) < self.max_num_species:
                 species_to_keep.add(key)
                 keep_species_adjusted_sum += species.adjusted_fitness_sum
         new_species = []
@@ -1091,13 +1214,13 @@ class Population:
                 #print("total_adjusted_fitness", total_adjusted_fitness)
                 percent_allocated = float(species.adjusted_fitness_sum) / float(keep_species_adjusted_sum)
                 genomes_allocated = int(percent_allocated * self.population_size)
-                print("species fitness", species.adjusted_fitness_sum)
-                print("keep_species_adjusted_sum", keep_species_adjusted_sum)
-                print("test", percent_allocated)
-                print("test4", genomes_allocated)
-                print("Species to keep: ", species_to_keep)
-                print("num genomes added: ", len(new_genomes))
-                input("press button")
+                #print("species fitness", species.adjusted_fitness_sum)
+                #print("keep_species_adjusted_sum", keep_species_adjusted_sum)
+                #print("test", percent_allocated)
+                #print("test4", genomes_allocated)
+                #print("Species to keep: ", species_to_keep)
+                #print("num genomes added: ", len(new_genomes))
+                #input("press button")
                 ## Generate the new genomes for this species.
                 for i in range(genomes_allocated):
                     try:
@@ -1129,7 +1252,7 @@ class Population:
         ## Create random genomes to replace the ones lost.
 
         num_genomes_left = self.population_size - num_genomes_created
-        print("num_genomes_left", num_genomes_left)
+        #print("num_genomes_left", num_genomes_left)
 
         for i in range(num_genomes_left):
             ## Add random genome to species.
@@ -1165,13 +1288,13 @@ class Population:
         ##print("species list length: {}, genome length: {}".format(len(self.species_list), 0))
         output_data = self.species_list[self.current_species].genomes[self.current_genome].run_network(input_data)
         temp_genes = self.species_list[self.current_species].genomes[self.current_genome].genes
-        if len(temp_genes) > self.max_num_genes:
-            print(len(temp_genes))
-            for gene in temp_genes:
-                print("Gene in_node:{}, in_type:{}, out_node:{}, out_type:{}, weight:{}, bias:{}".format(gene.in_node, gene.input_type, gene.out_node, gene.output_type, gene.weight, gene.bias))
+        #if len(temp_genes) > self.max_num_genes:
+        #    print(len(temp_genes))
+        #    for gene in temp_genes:
+        #        print("Gene in_node:{}, in_type:{}, out_node:{}, out_type:{}, weight:{}, bias:{}".format(gene.in_node, gene.input_type, gene.out_node, gene.output_type, gene.weight, gene.bias))
 
-            #input("Press a key to continue...")
-            self.max_num_genes = len(temp_genes)
+        #    #input("Press a key to continue...")
+        #    self.max_num_genes = len(temp_genes)
 
         ## Return the output of the current run.
         return output_data
@@ -1232,6 +1355,11 @@ class Population:
             self.highest_fitness = reward
             self.best_genome = copy.deepcopy(self.species_list[self.current_species].genomes[self.current_genome])
 
+    def print_current(self):
+        current_genome = self.species_list[self.current_species].genomes[self.current_genome]
+        #for gene in current_genome.genes:
+        #    print(gene.printable())
+
 if __name__ == '__main__':
     ## Generate XOR data.
     inputs = []
@@ -1239,24 +1367,25 @@ if __name__ == '__main__':
         for j in range(2):
             inputs.append([i, j])
 
-    test_population = Population(2, 1, 42, len(inputs))
+    test_population = Population(2, 1, None, len(inputs))
     test_population.setup()
 
     fitness = 0
-    for i in range(30000):
+    for i in range(80000):
         temp_index = i % len(inputs)
-        if temp_index == 0:
-            print("Generation: {}, Species: {}, Genome:{}, Frame:{}".format(test_population.current_generation, test_population.current_species, test_population.current_genome, test_population.current_frame))
+        #if temp_index == 0:
+        #    print("Generation: {}, Species: {}, Genome:{}, Frame:{}".format(test_population.current_generation, test_population.current_species, test_population.current_genome, test_population.current_frame))
 
         ## First run our current position.
-        print("Species size:{}".format(len(test_population.species_list[test_population.current_species].genomes)))
-        print("Number of Species:{}".format(len(test_population.species_list)))
+        #print("Species size:{}".format(len(test_population.species_list[test_population.current_species].genomes)))
+        #print("Number of Species:{}".format(len(test_population.species_list)))
         #print("Generation processed:{}".format(test_population.generation_processed))
         #print("test42")
         temp_output = test_population.process_data(inputs[temp_index])[0]
         actual_output = inputs[temp_index][0] ^ inputs[temp_index][1]
         #error = - ((temp_output - actual_output)*(temp_output - actual_output))
-        fitness += ( 1 - math.pow(actual_output - temp_output, 2))
+        #fitness += ( 1 - math.pow(actual_output - temp_output, 2))
+        fitness += (1 - abs(actual_output - temp_output))
         #print("Prediction: {}. Actual: {}\nFitness: {}".format(temp_output, actual_output, fitness))
         #test_population.apply_reward(fitness
 
@@ -1271,9 +1400,12 @@ if __name__ == '__main__':
             for l in range(4):
                 temp_output = test_population.process_data(inputs[l])[0]
                 actual_output = inputs[l][0] ^ inputs[l][1]
-                temp_fitness += (1 - math.pow(actual_output - temp_output, 2))
-                #if temp_fitness > 2:
-                #    print("Prediction: {}. Actual: {}\nFitness: {}".format(temp_output, actual_output, temp_fitness))
+                #temp_fitness += (1 - math.pow(actual_output - temp_output, 2))
+                temp_fitness += (1 - abs(actual_output - temp_output))
+                #if temp_fitness > 3.0:
+                #    #print("Prediction: {}. Actual: {}\nFitness: {}".format(temp_output, actual_output, temp_fitness))
+                #    #test_population.print_current()
+                #    #input("...")
 
             #if temp_fitness > 2.0:
             #    print("temp_fitness: {}".format(temp_fitness))
