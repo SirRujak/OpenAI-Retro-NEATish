@@ -2,7 +2,8 @@
 import numpy as np
 import tensorflow as tf
 
-from tensorflow.keras.engine.topology import Layer
+##from tensorflow.keras.engine.topology import Layer
+##from tensorflow.keras import backend as K
 
 from retro_contest.local import make
 
@@ -16,15 +17,24 @@ import imagehash
 import json
 import math
 
+import cv2
+
+import NEATish
+
 
 
 class bebna:
     def __init__(self, initial_random_actions=256, num_actions=12,
-            num_frames_before_show=100):
+            num_frames_before_show=100, encoding_layer_depth=256):
         self.initial_random_actions = initial_random_actions
         self.num_frames_before_show = num_frames_before_show
         self.current_frame = 0
         self.num_actions = num_actions
+        self.num_learning_actions = 10
+        self.encoding_layer_depth = encoding_layer_depth
+
+        self.current_fitness = 0.0
+        self.active_reward_fitness = 0.0
 
 
         self.b_action = 0
@@ -105,8 +115,10 @@ class bebna:
 
 
 
-    def setup(self, env, observation_hashes={}):
+    def setup(self, env, observation_hashes=None):
         self.env = env
+
+        self.NEAT = NEATish.Population(self.encoding_layer_depth, self.num_learning_actions, 42, 60)
 
         self.last_action = self.env.action_space.sample()
         self.last_hash = None
@@ -120,7 +132,10 @@ class bebna:
         self.similarity = np.zeros((16, 16))
         self.uniqueness = np.zeros(16)
         self.uniqueness_check = np.zeros(16)
-        self.observation_hashes = observation_hashes
+        if observation_hashes:
+            self.observation_hashes = observation_hashes
+        else:
+            self.observation_hashes = {}
         self.config = tf.ConfigProto()
         self.session = tf.Session(config=self.config)
         self.encoder_model = None
@@ -136,6 +151,15 @@ class bebna:
         self.fig, self.ax = plt.subplots(1,1)
         self.image = self.ax.imshow(self.encoder_images[:, :, :], animated=True)
         #self.fig.canvas.draw()
+
+        self.initial_exploration_index = 0
+        self.initial_exploration_counter = 0
+        self.initial_exploration_list = np.arange(10)
+        np.random.shuffle(self.initial_exploration_list)
+
+        self.num_unique_frames = 0
+
+        self.map_tracker = MapTracker()
 
 
     def animate_data(self, screen_frame, predicted_frame):
@@ -208,42 +232,102 @@ class bebna:
         return new_data
 
     def process_data(self, obs, info={}, f=None):
+        if self.map_tracker.keystone_image is None:
+            self.map_tracker.keystone_image = obs
+        genome_processed = False
         ## This was the old hash, we are now using distance hashes.
         #temp_hash = sha1(obs).hexdigest()
         ## New hashing method.
-        temp_hash = imagehash.average_hash(Image.fromarray(obs, mode='RGB'))
+        temp_hash = imagehash.whash(Image.fromarray(obs, mode='RGB'))
+        if self.last_hash:
+            if temp_hash - self.last_hash < 10:
+                temp_hash = self.last_hash
+                self.NEAT.extra_frames_earned -= 1
         ## We want to do random things for a bit, but not too long. Then move
         ## on to actually predicting data.
-        if self.current_random_actions < self.initial_random_actions:
-            output_data = self.env.action_space.sample()
-            self.current_random_actions += 1
-        else:
-            ## TODO: Actually do something :P
-            #output_data = self.actuator_model.predict(np.expand_dims(obs, axis=0))[0]
-            ##print('output_data final: {}'.format(output_data))
-            #output_data = np.argmax(output_data)
-            #output_data = self.convert_to_action_space(output_data)
 
-            if np.array_equal(self.last_action, np.array([1, 0, 0, 0, 0, 0, 0,1, 0, 0, 0, 0])):
-                output_data = np.array([0, 0, 0, 0, 0, 0, 0,
-                               1, 0, 0, 0, 0])
-            else:
-                output_data = np.array([1, 0, 0, 0, 0, 0, 0,
-                               1, 0, 0, 0, 0])
-
+        ## First, encode the frame.
+        encoded_frame = self.encoder_frozen_model.predict(np.expand_dims(obs, axis=0))
+        encoded_frame *= (1.0/1000.0)
+        #print("np max",np.amax(encoded_frame))
+        #print("np min",np.amin(encoded_frame))
 
         ## Add this observation to the set of ones seen.
-        ## Update the network, save the output from this, and return the new set
-        ## of instructions.
         self.add_observation(obs, temp_hash, info, f)
+        if len(self.observation_hashes) > 0:
+            for hash in self.observation_hashes:
+                if temp_hash - hash < 16:
+                    ## We have seen a very similar screen before.
+                    temp_hash = hash
+                    break
         if temp_hash in self.observation_hashes:
+            self.current_fitness += 1000 / self.observation_hashes[temp_hash]
+            self.active_reward_fitness += 1000 / self.observation_hashes[temp_hash]
             self.observation_hashes[temp_hash] += 1
         else:
+            self.current_fitness += 1000.0
+            self.active_reward_fitness += 1000.0
+            self.num_unique_frames += 1
+            print("Number of unique frames: {}".format(self.num_unique_frames))
             self.observation_hashes[temp_hash] = 1
+
+        if self.active_reward_fitness > 1000.0:
+            self.NEAT.extra_frames_earned += (self.active_reward_fitness // 1000) * 10
+            self.active_reward_fitness %= 1000.0
+
+
+
+        if self.current_random_actions < 0: #self.initial_random_actions:
+            current_action = self.initial_exploration_index
+            output_data = self.convert_to_action_space(current_action)
+            #output_data = self.env.action_space.sample()
+            self.current_random_actions += 1
+            self.initial_exploration_counter += 1
+            if self.initial_exploration_counter > 14:
+                self.initial_exploration_counter = 0
+                self.initial_exploration_index += 1
+                if self.initial_exploration_index > self.initial_exploration_list.size:
+                    self.initial_exploration_index = 0
+            self.current_fitness = 0.0
+            self.active_reward_fitness = 0.0
+        else:
+            ## TODO: Actually do something :P
+
+            output = self.NEAT.process_data(encoded_frame[0])
+            ## Check if we need to start a new generation.
+            self.NEAT.check_location()
+            if self.NEAT.genome_processed:
+                self.NEAT.apply_reward(self.current_fitness)
+                self.current_fitness = 0.0
+                self.active_reward_fitness = 0.0
+                #genome_processed = True
+            if self.NEAT.generation_processed:
+                self.NEAT.process_new_generation()
+
+
+            ## Start passing the encoded_frame into the NEAT implementation.
+            self.NEAT.update_position()
+
+            output_data = np.argmax(output)
+            output_data = self.convert_to_action_space(output_data)
+            #print(encoded_frame)
+            #print(output_data)
+            #input('...')
+
+            #if np.array_equal(self.last_action, np.array([1, 0, 0, 0, 0, 0, 0,1, 0, 0, 0, 0])):
+            #    output_data = np.array([0, 0, 0, 0, 0, 0, 0,
+            #                   1, 0, 0, 0, 0])
+            #else:
+            #    output_data = np.array([1, 0, 0, 0, 0, 0, 0,
+            #                   1, 0, 0, 0, 0])
+
+
+        ## Update the network, save the output from this, and return the new set
+        ## of instructions.
         ##print("output_data: {}".format(output_data))
         self.last_action = output_data
         self.last_hash = temp_hash
-        return output_data
+        return output_data, genome_processed
 
 
     def add_observation(self, obs, temp_hash, info, f):
@@ -280,7 +364,7 @@ class bebna:
         ##print("last_action: {}".format(self.last_action))
         ##print("last_train: {}".format(temp_action))
         ##print("last_train shape: {}".format(temp_action.shape))
-        self.actuator_model.fit(np.expand_dims(self.observations[1], axis=0), np.expand_dims(temp_action, axis=0),verbose=0)
+        #self.actuator_model.fit(np.expand_dims(self.observations[1], axis=0), np.expand_dims(temp_action, axis=0),verbose=0)
 
 
     def mse(self, index):
@@ -305,7 +389,7 @@ class bebna:
             ## Check if it is a new observation. We don't need to check for old
             ## ones.
             if current_hash not in self.observation_hashes:
-                self.save_image(obs, current_hash, info, f)
+                #self.save_image(obs, current_hash, info, f)
                 for i in range(16):
                     self.uniqueness_check[i] = self.mse(i)
                 temp_uniqueness = np.sum(self.uniqueness_check)
@@ -354,182 +438,195 @@ class bebna:
     '''
 
     def make_encoder_decoder(self):
+        try:
+            #self.encoder_model = tf.keras.models.load_model('models/encoder_model')
+            self.encoder_frozen_model = tf.keras.models.load_model('models/encoder_model.h5')
+            for layer in self.encoder_frozen_model.layers:
+                layer.trainable=False
+
+            #self.decoder_model = tf.keras.models.load_model('models/decoder_model')
+            self.decoder_frozen_model = tf.keras.models.load_model('models/decoder_model.h5')
+            for layer in self.decoder_frozen_model.layers:
+                layer.trainable=False
+
+            #self.puzzle_solver_model = tf.keras.models.load_model('models/puzzle_model.h5')
+            #self.decoder_eval_model = tf.keras.models.load_model('models/decoder_eval_model.h5')
+
+        except:
+            input('...')
+            self.encoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
+                    )
+            self.encoder_convolution_0 = tf.keras.layers.Conv2D(16,kernel_size=(4, 4),strides=(4,4), padding='valid')(self.encoder_input)
+            self.encoder_convolution_1 = tf.keras.layers.Conv2D(32,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.encoder_convolution_0)
+            self.encoder_convolution_2 = tf.keras.layers.Conv2D(64,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.encoder_convolution_1)
+            self.encoder_convolution_3 = tf.keras.layers.Conv2D(128,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.encoder_convolution_2)
+            self.encoder_flat = tf.keras.layers.Flatten()(
+                    self.encoder_convolution_3)
+            self.encoder_encoding_layer = tf.keras.layers.Dense(self.encoding_layer_depth,
+                    )(self.encoder_flat)
+            self.encoder_model = tf.keras.models.Model(
+                    self.encoder_input, self.encoder_encoding_layer)
+
+            ## Decoder
+            ## The encoder segment should be trainable while we are training the
+            ## autoencoder so we do not deactivate them here.
+            ## Secondary path is based on: https://arxiv.org/pdf/1603.09246.pdf
+            ## Secondary path for the decoder. Plan of action:
+            ## We are going to slice the image up into units of h:112 w:160
+            ## This makes a 4 by 4 grid of the image.
+            ## Make a list from zero to 3.
+            ## Randomly shuffle that list.
+
+            self.decoder_sgd = tf.keras.optimizers.SGD(lr=0.1, momentum=0.1,
+                    decay=0.1)
+
+            self.puzzle_solver_input = tf.keras.layers.Input(shape=(224, 320, 3,),
+                    name='puzzle_encoder_input')
+            self.decoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
+                    name='decoder_encoder_input')
+            self.puzzle_encoder_layer = self.encoder_model(self.puzzle_solver_input)
+            self.decoder_encoder_layer = self.encoder_model(self.decoder_input)
+
+            self.puzzle_solver_layer_1 = tf.keras.layers.Dense(64)(self.puzzle_encoder_layer)
+            self.puzzle_solver_layer_2 = tf.keras.layers.Dense(32)(self.puzzle_solver_layer_1)
+            self.puzzle_solver_layer_3 = tf.keras.layers.Dense(24)(self.puzzle_solver_layer_2)
+            self.puzzle_solver_output = tf.keras.layers.Dense(24, name='puzzle_output')(self.puzzle_solver_layer_3)
+            self.puzzle_solver_model = tf.keras.models.Model(self.puzzle_solver_input, self.puzzle_solver_output)
+            self.puzzle_solver_model.compile(optimizer='adam',loss={'puzzle_output':'categorical_crossentropy'})
+
+
+            ## This next line is used if we ever want to be able to run the
+            ## decoder by itself. Probably not something we need but it is
+            ## there anyways.
+            ##self.decoder_input = tf.layers.Input(128, name="decoder_input")
+            self.decoder_decoding_layer = tf.keras.layers.Dense(
+                    8960)(self.decoder_encoder_layer)
+            self.decoder_reshaped = tf.keras.layers.Reshape(
+                    target_shape=(7, 10, 128))(self.decoder_decoding_layer)
+            self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(256,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_reshaped)
+            self.decoder_deconvolution_1_2 = tf.keras.layers.Conv2DTranspose(256,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_reshaped)
+            self.decoder_deconvolution_2 = tf.keras.layers.Conv2DTranspose(128,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_deconvolution_1)
+            self.decoder_deconvolution_2_2 = tf.keras.layers.Conv2DTranspose(128,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_deconvolution_1_2)
+            self.decoder_tower_output = tf.keras.layers.concatenate([self.decoder_deconvolution_2, self.decoder_deconvolution_2_2])
+            self.decoder_deconvolution_3 = tf.keras.layers.Conv2DTranspose(128,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_tower_output)
+            self.decoder_output = tf.keras.layers.Conv2DTranspose(3,
+                    kernel_size=(4,4), strides=(4,4), padding='valid',
+                    activation='sigmoid',
+                    name="decoder_output")(self.decoder_deconvolution_3)
+            #self.decoder_dense_output = tf.keras.layers.Dense(215040, activation='sigmoid')(self.decoder_deconvolution_2)
+            #self.decoder_output = tf.keras.layers.Reshape(target_shape=(224, 320, 3),name="decoder_output")(self.decoder_dense_output)
+
+            self.decoder_model = tf.keras.models.Model([self.decoder_input],
+                    [self.decoder_output])
+            self.decoder_model.compile(optimizer='adam', loss='mse')
+            print(self.decoder_model.summary())
+
+            #self.puzzle_plus_decoder_model = tf.keras.models.Model(
+            #        inputs=[self.decoder_input, self.puzzle_solver_input],
+            #        outputs=[self.decoder_output, self.puzzle_solver_output])
+            #self.puzzle_plus_decoder_model.compile(optimizer='sgd',
+            #        loss={'decoder_output':'mse', 'puzzle_output':'categorical_crossentropy'},
+            #        loss_weights={'decoder_output':0.45, 'puzzle_output':3.0})
+
+            ## Actuator
+            ## We make sure here that the encoder is not trainable when we call
+            ## the actuator.
+            self.encoder_convolution_0.trainable = False
+            self.encoder_convolution_1.trainable = False
+            self.encoder_convolution_2.trainable = False
+            self.encoder_convolution_3.trainable = False
+            self.encoder_encoding_layer.trainable = False
+
+
+            ## For looking at decoder output.
+            self.decoder_decoding_layer.trainable = False
+            self.decoder_reshaped.trainable = False
+            self.decoder_deconvolution_1.trainable = False
+            self.decoder_deconvolution_2.trainable = False
+            self.decoder_deconvolution_3.trainable = False
+
+            self.decoder_output.trainable = False
+            self.decoder_eval_model = tf.keras.models.Model([self.decoder_input],
+                    [self.decoder_output])
+            self.decoder_eval_model.compile(optimizer=self.decoder_sgd, loss='mse')
+            ##print(self.decoder_model.summary())
+            ## Also make and compile the encoder model here so it can be used
+            ## in a frozen manner.
+            #self.encoder_model = tf.keras.models.Model(
+            #        inputs=[self.encoder_input],
+            #        outputs=[self.encoder_encoding_layer])
+
+            print(self.encoder_model.summary())
+
+            #self.encoder_sgd = tf.keras.optimizers.SGD(lr=0.01, momentum=0.0,
+            #        decay=0.0, nesterov=True)
+            self.encoder_model.compile(optimizer='adam', loss='mse')
+
+
+
+        ## Predictor.
+        ## LSTM input is number in encoded layer(256) + number of actions(8)
+        self.lstm_input_size = self.encoding_layer_depth + 8
+        self.predictor_input = tf.keras.layers.Input(batch_shape=(self.lstm_input_size, 1, 1))
+        self.predictor_LSTM = tf.keras.layers.LSTM(128, bias_initializer='glorot_uniform', stateful=True, return_state=True)
+        self.predictor_LSTM_output, self.predictor_LSTM_state_h, self.predictor_LSTM_state_c = self.predictor_LSTM(self.predictor_input)
+        self.predictor_fc_1 = tf.keras.layers.Dense(64)(self.predictor_LSTM_output)
+        self.predictor_fc_2 = tf.keras.layers.Dense(self.encoding_layer_depth)(self.predictor_LSTM_output)
+        #self.predictor_MDN = MDN(self.lstm_input_size, 8)
+        self.predictor_model = tf.keras.models.Model([self.predictor_input], [self.predictor_fc_2, self.predictor_LSTM_state_h])
+        #self.predictor_optimizer = Adam(lr=0.001)
+        #self.predictor_model = tf.keras.models.Model([self.predictor_input], [self.predictor_MDN])
+        #self.predictor_model.compile(loss=mdn_loss(), optimizer=self.predictor_optimizer)
+        #self.predictor_model.compile(loss=mdn_loss(), optimizer='adam')
+        self.predictor_model.compile(loss="logcosh", optimizer='adam')
+
+
+        ## Actuator code.
+        ## Use NEAT rather than tensorflow for this.
+        '''
+        self.actuator_input = tf.keras.layers.Input(shape=(224, 320, 3,),
+                name='actuator_input')
+        self.actuator_encoded = self.encoder_frozen_model(self.actuator_input)
+        self.actuator_dense_1 = tf.keras.layers.Dense(64)(
+                self.actuator_encoded)
+        self.actuator_dense_2 = tf.keras.layers.Dense(32)(
+                self.actuator_dense_1)
+        self.actuator_dense_3 = tf.keras.layers.Dense(16)(
+                self.actuator_dense_2)
+        self.actuator_output = tf.keras.layers.Dense(10,
+                name="actuator_output",
+                activation="softmax")(self.actuator_dense_3)
+        self.actuator_model = tf.keras.models.Model([self.actuator_input],
+                [self.actuator_output])
+
+        self.actuator_model.compile(optimizer='adam',
+                loss='categorical_crossentropy')
+        '''
+
+        self.NEAT.setup()
+
+
         with self.session as sess:
-            try:
-                #self.encoder_model = tf.keras.models.load_model('models/encoder_model')
-                self.encoder_frozen_model = tf.keras.models.load_model('models/encoder_model.h5')
-                for layer in self.encoder_frozen_model.layers:
-                    layer.trainable=False
+            #tf.initialize_all_variables().run()
+            tf.global_variables_initializer().run()
 
-                #self.decoder_model = tf.keras.models.load_model('models/decoder_model')
-                self.decoder_frozen_model = tf.keras.models.load_model('models/decoder_model.h5')
-                for layer in self.decoder_frozen_model.layers:
-                    layer.trainable=False
-
-                #self.puzzle_solver_model = tf.keras.models.load_model('models/puzzle_model.h5')
-                #self.decoder_eval_model = tf.keras.models.load_model('models/decoder_eval_model.h5')
-
-            except:
-                self.encoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
-                        )
-                self.encoder_convolution_0 = tf.keras.layers.Conv2D(16,kernel_size=(4, 4),strides=(4,4), padding='valid')(self.encoder_input)
-                self.encoder_convolution_1 = tf.keras.layers.Conv2D(32,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.encoder_convolution_0)
-                self.encoder_convolution_2 = tf.keras.layers.Conv2D(64,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.encoder_convolution_1)
-                self.encoder_convolution_3 = tf.keras.layers.Conv2D(128,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.encoder_convolution_2)
-                self.encoder_flat = tf.keras.layers.Flatten()(
-                        self.encoder_convolution_3)
-                self.encoder_encoding_layer = tf.keras.layers.Dense(256,
-                        )(self.encoder_flat)
-                self.encoder_model = tf.keras.models.Model(
-                        self.encoder_input, self.encoder_encoding_layer)
-
-                ## Decoder
-                ## The encoder segment should be trainable while we are training the
-                ## autoencoder so we do not deactivate them here.
-                ## Secondary path is based on: https://arxiv.org/pdf/1603.09246.pdf
-                ## Secondary path for the decoder. Plan of action:
-                ## We are going to slice the image up into units of h:112 w:160
-                ## This makes a 4 by 4 grid of the image.
-                ## Make a list from zero to 3.
-                ## Randomly shuffle that list.
-
-                self.decoder_sgd = tf.keras.optimizers.SGD(lr=0.1, momentum=0.1,
-                        decay=0.1)
-
-                self.puzzle_solver_input = tf.keras.layers.Input(shape=(224, 320, 3,),
-                        name='puzzle_encoder_input')
-                self.decoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
-                        name='decoder_encoder_input')
-                self.puzzle_encoder_layer = self.encoder_model(self.puzzle_solver_input)
-                self.decoder_encoder_layer = self.encoder_model(self.decoder_input)
-
-                self.puzzle_solver_layer_1 = tf.keras.layers.Dense(64)(self.puzzle_encoder_layer)
-                self.puzzle_solver_layer_2 = tf.keras.layers.Dense(32)(self.puzzle_solver_layer_1)
-                self.puzzle_solver_layer_3 = tf.keras.layers.Dense(24)(self.puzzle_solver_layer_2)
-                self.puzzle_solver_output = tf.keras.layers.Dense(24, name='puzzle_output')(self.puzzle_solver_layer_3)
-                self.puzzle_solver_model = tf.keras.models.Model(self.puzzle_solver_input, self.puzzle_solver_output)
-                self.puzzle_solver_model.compile(optimizer='adam',loss={'puzzle_output':'categorical_crossentropy'})
-
-
-                ## This next line is used if we ever want to be able to run the
-                ## decoder by itself. Probably not something we need but it is
-                ## there anyways.
-                ##self.decoder_input = tf.layers.Input(128, name="decoder_input")
-                self.decoder_decoding_layer = tf.keras.layers.Dense(
-                        8960)(self.decoder_encoder_layer)
-                self.decoder_reshaped = tf.keras.layers.Reshape(
-                        target_shape=(7, 10, 128))(self.decoder_decoding_layer)
-                self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(256,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.decoder_reshaped)
-                self.decoder_deconvolution_1_2 = tf.keras.layers.Conv2DTranspose(256,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.decoder_reshaped)
-                self.decoder_deconvolution_2 = tf.keras.layers.Conv2DTranspose(128,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.decoder_deconvolution_1)
-                self.decoder_deconvolution_2_2 = tf.keras.layers.Conv2DTranspose(128,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.decoder_deconvolution_1_2)
-                self.decoder_tower_output = tf.keras.layers.concatenate([self.decoder_deconvolution_2, self.decoder_deconvolution_2_2])
-                self.decoder_deconvolution_3 = tf.keras.layers.Conv2DTranspose(128,
-                        kernel_size=(2,2), strides=(2,2), padding='valid',
-                        activation='relu')(self.decoder_tower_output)
-                self.decoder_output = tf.keras.layers.Conv2DTranspose(3,
-                        kernel_size=(4,4), strides=(4,4), padding='valid',
-                        activation='sigmoid',
-                        name="decoder_output")(self.decoder_deconvolution_3)
-                #self.decoder_dense_output = tf.keras.layers.Dense(215040, activation='sigmoid')(self.decoder_deconvolution_2)
-                #self.decoder_output = tf.keras.layers.Reshape(target_shape=(224, 320, 3),name="decoder_output")(self.decoder_dense_output)
-
-                self.decoder_model = tf.keras.models.Model([self.decoder_input],
-                        [self.decoder_output])
-                self.decoder_model.compile(optimizer='adam', loss='mse')
-                print(self.decoder_model.summary())
-
-                #self.puzzle_plus_decoder_model = tf.keras.models.Model(
-                #        inputs=[self.decoder_input, self.puzzle_solver_input],
-                #        outputs=[self.decoder_output, self.puzzle_solver_output])
-                #self.puzzle_plus_decoder_model.compile(optimizer='sgd',
-                #        loss={'decoder_output':'mse', 'puzzle_output':'categorical_crossentropy'},
-                #        loss_weights={'decoder_output':0.45, 'puzzle_output':3.0})
-
-                ## Actuator
-                ## We make sure here that the encoder is not trainable when we call
-                ## the actuator.
-                self.encoder_convolution_0.trainable = False
-                self.encoder_convolution_1.trainable = False
-                self.encoder_convolution_2.trainable = False
-                self.encoder_convolution_3.trainable = False
-                self.encoder_encoding_layer.trainable = False
-
-
-                ## For looking at decoder output.
-                self.decoder_decoding_layer.trainable = False
-                self.decoder_reshaped.trainable = False
-                self.decoder_deconvolution_1.trainable = False
-                self.decoder_deconvolution_2.trainable = False
-                self.decoder_deconvolution_3.trainable = False
-
-                self.decoder_output.trainable = False
-                self.decoder_eval_model = tf.keras.models.Model([self.decoder_input],
-                        [self.decoder_output])
-                self.decoder_eval_model.compile(optimizer=self.decoder_sgd, loss='mse')
-                ##print(self.decoder_model.summary())
-                ## Also make and compile the encoder model here so it can be used
-                ## in a frozen manner.
-                #self.encoder_model = tf.keras.models.Model(
-                #        inputs=[self.encoder_input],
-                #        outputs=[self.encoder_encoding_layer])
-
-                print(self.encoder_model.summary())
-
-                #self.encoder_sgd = tf.keras.optimizers.SGD(lr=0.01, momentum=0.0,
-                #        decay=0.0, nesterov=True)
-                self.encoder_model.compile(optimizer='adam', loss='mse')
-
-
-
-            ## Predictor.
-            ## LSTM input is number in encoded layer(256) + number of actions(8)
-            self.lstm_input_size = 256 + 8
-            self.predictor_input = tf.keras.layers.Input(shape=(self.lstm_input_size, 1,))
-            self.predictor_LSTM = tf.keras.layers.LSTM(4096, bias_initializer='glorot_uniform', stateful=True, return_state=True)
-            self.predictor_LSTM_output, self.predictor_LSTM_state_h, self.predictor_LSTM_state_c = self.predictor_LSTM(self.predictor_input)
-            self.predictor_fc_1 = tf.keras.layers.Dense(2048)(self.predictor_LSTM_output)
-            self.predictor_MDN = MDN(self.lstm_input_size, 8)
-            self.predictor_optimizer = Adam(lr=0.001)
-            self.predictor_model = tf.keras.models.Model([self.predictor_input], [self.predictor_MDN])
-            self.predictor_model.compile(loss=mdn_loss(), optimizer=self.predictor_optimizer)
-
-
-            ## Actuator code.
-            self.actuator_input = tf.keras.layers.Input(shape=(224, 320, 3,),
-                    name='actuator_input')
-            self.actuator_encoded = self.encoder_frozen_model(self.actuator_input)
-            self.actuator_dense_1 = tf.keras.layers.Dense(64)(
-                    self.actuator_encoded)
-            self.actuator_dense_2 = tf.keras.layers.Dense(32)(
-                    self.actuator_dense_1)
-            self.actuator_dense_3 = tf.keras.layers.Dense(16)(
-                    self.actuator_dense_2)
-            self.actuator_output = tf.keras.layers.Dense(10,
-                    name="actuator_output",
-                    activation="softmax")(self.actuator_dense_3)
-            self.actuator_model = tf.keras.models.Model([self.actuator_input],
-                    [self.actuator_output])
-
-            self.actuator_model.compile(optimizer='adam',
-                    loss='categorical_crossentropy')
-
-            tf.initialize_all_variables().run()
-
+'''
 ## MDN Stuff - https://github.com/yanji84/keras-mdn
 
 def get_mixture_coef(output, numComonents=24, outputDim=1):
@@ -569,9 +666,9 @@ def mdn_loss(numComponents=24, outputDim=1):
     def loss(y, output):
         out_pi, out_sigma, out_mu = get_mixture_coef(output, numComponents, outputDim)
         return get_lossfunc(out_pi, out_sigma, out_mu, y)
-return loss
+    return loss
 
-class MDN(Layer):
+class MDN(tf.keras.layers.Layer):
     def __init__(self, kernelDim, numComponents, **kwargs):
         self.hiddenDim = 24
         self.kernelDim = kernelDim
@@ -596,34 +693,88 @@ class MDN(Layer):
     def get_output_shape_for(self, inputShape):
         return (inputShape[0], self.outputDim)
 
+'''
+
+## New MDN:
+
+class MapTracker:
+    def __init__(self, keystone_image=None, image_height=56, image_width=80):
+
+        self.keystone_image = keystone_image
+        self.current_x_y_coords = (0.0, 0.0)
+        self.reward_for_pixel = 10.0
+        self.pixels_seen = np.zeros(shape=(10001,10001), dtype=int)
+        ## Put all the initial pixels in the dictionary.
+        #print(image_height+10000 // 2)
+        for i in range(image_height+10000 // 2):
+            for j in range(image_width+10000 // 2):
+                self.pixels_seen[j][i] = 1
+                self.pixels_seen[-j][i] = 1
+                self.pixels_seen[j][-i] = 1
+                self.pixels_seen[j][i] = 1
 
 
+    def reset(self):
+        self.current_x_y_coords = (0.0, 0.0)
+        self.pixels_seen.fill(0)
+        for i in range(image_height+10000 // 2):
+            for j in range(image_width+10000 // 2):
+                self.pixels_seen[j][i] = 1
+                self.pixels_seen[-j][i] = 1
+                self.pixels_seen[j][-i] = 1
+                self.pixels_seen[j][i] = 1
+
+    def caluclate_reward(self, last_img, new_img):
+        ## Scale the images down.
+        last_img_resized = cv2.resize(last_img, dsize=(image_height, image_width), interpolation=cv2.INTER_CUBIC)
+        new_img_resized = cv2.resize(new_img, dsize=(image_height, image_width), interpolation=cv2.INTER_CUBIC)
+        if image_hash.whash(new_img_resized) - imagehash.whash(self.keystone_image) < 4:
+            self.current_x_y_coords = (0.0, 0.0)
+            x_shift_int = 0
+            y_shift_int = 0
+        else:
+            transform_matrix = cv2.estimateRigidTransform(last_img_resized, new_img_resized)
+            x_shift = transform_matrix[0][2]
+            y_shift = transform_matrix[1][2]
+            new_x = self.current_x_y_coords[0] + x_shift
+            new_y = self.current_x_y_coords[1] + y_shfit
+            self.current_x_y_coords = (new_x, new_y)
+        x_shift_int = int(floor(new_x) - image_width / 2)
+        y_shift_int = int(floor(new_y) - image_height / 2)
+
+        reward = 0.0
+        for i in range(image_height):
+            for j in range(image_width):
+                self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int] += 1
+                reward += self.reward_for_pixel / self.pixels_seen[j][i]
+
+        return reward
 
 
 def main():
 
-    envs = [('SonicTheHedgehog-Genesis','GreenHillZone.Act',('1','2','3')),
+    envs = [('SonicTheHedgehog-Genesis','GreenHillZone.Act',('1','3')),
             ('SonicTheHedgehog-Genesis','LabyrinthZone.Act',('1','2','3')),
             ('SonicTheHedgehog-Genesis','MarbleZone.Act',('1','2','3')),
-            ('SonicTheHedgehog-Genesis','ScrapBrainZone.Act',('1','2')),
-            ('SonicTheHedgehog-Genesis','SpringYardZone.Act',('1','2','3')),
-            ('SonicTheHedgehog-Genesis','StarLightZone.Act',('1','2','3')),
+            ('SonicTheHedgehog-Genesis','ScrapBrainZone.Act',('2')),
+            ('SonicTheHedgehog-Genesis','SpringYardZone.Act',('2','3')),
+            ('SonicTheHedgehog-Genesis','StarLightZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','AquaticRuinZone.Act',('1','2')),
-            ('SonicTheHedgehog2-Genesis','CasinoNightZone.Act',('1','2')),
+            ('SonicTheHedgehog2-Genesis','CasinoNightZone.Act',('1')),
             ('SonicTheHedgehog2-Genesis','ChemicalPlantZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','EmeraldHillZone.Act',('1','2')),
-            ('SonicTheHedgehog2-Genesis','HillTopZone.Act',('1','2')),
-            ('SonicTheHedgehog2-Genesis','MetropolisZone.Act',('1','2','3')),
+            ('SonicTheHedgehog2-Genesis','HillTopZone.Act',('1')),
+            ('SonicTheHedgehog2-Genesis','MetropolisZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','MysticCaveZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','OilOceanZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','AngelIslandZone.Act',('1','2')),
+            ('SonicAndKnuckles3-Genesis','AngelIslandZone.Act',('2')),
             ('SonicAndKnuckles3-Genesis','CarnivalNightZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','DeathEggZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','FlyingBatteryZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','HydrocityZone.Act',('1','2')),
+            ('SonicAndKnuckles3-Genesis','FlyingBatteryZone.Act',('1')),
+            ('SonicAndKnuckles3-Genesis','HydrocityZone.Act',('2')),
             ('SonicAndKnuckles3-Genesis','IcecapZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','LaunchBaseZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','LavaReefZone.Act',('1','2')),
+            ('SonicAndKnuckles3-Genesis','LavaReefZone.Act',('2')),
             ('SonicAndKnuckles3-Genesis','MarbleGardenZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','MushroomHillZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','SandopolisZone.Act',('1','2'))]
@@ -635,16 +786,18 @@ def main():
             model = bebna()
             model.setup(env)
             obs = env.reset()
-            done == False
-            while not done:
-                action = model.process_data(obs, info)
+            done = False
+            #while not done:
+            while True:
+                action, genome_processed = model.process_data(obs)
                 #obs, rew, done, info = env.step(env.action_space.sample())
                 obs, rew, done, info = env.step(action)
                 #print('Info: {}'.format(info))
                 #model.animate_data(obs, obs)
                 env.render()
-                if done:
+                if done or genome_processed:
                     obs = env.reset()
+                    model.NEAT.extra_frames_earned = -10000000.0
 
 
 if __name__ == '__main__':

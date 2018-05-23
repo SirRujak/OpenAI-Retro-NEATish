@@ -89,7 +89,7 @@ class Species:
         #input("...")
 
         ## Check if the species made progress this generation.
-        if self.adjusted_fitness_sum > self.maximum_adjusted_fitness:
+        if self.adjusted_fitness_sum > self.maximum_adjusted_fitness + 0.05 * self.maximum_adjusted_fitness:
             self.stagnant_time = 0
         else:
             self.stagnant_time += 1
@@ -216,8 +216,8 @@ class Genome:
 
         self.num_hidden_nodes = len(hidden_node_set)
 
-        self.neuron_hidden_nodes = [Node()] * self.num_hidden_nodes
-        self.neuron_output_nodes = [Node()] * self.num_outputs
+        self.neuron_hidden_nodes = [Node() for _ in range(self.num_hidden_nodes)]
+        self.neuron_output_nodes = [Node() for _ in range(self.num_outputs)]
         for gene in self.genes:
             if gene.output_type == "HIDDEN":
                 self.neuron_hidden_nodes[self.hidden_node_dict[gene.out_node]].input_connections.add(gene)
@@ -244,25 +244,30 @@ class Genome:
                         temp_weight = connection.weight
                         temp_bias = 0
                         #temp_bias = connection.bias
-                        temp_sum += temp_in_value * temp_weight + temp_bias
+                        temp_value = temp_in_value * temp_weight# + temp_bias
+                        temp_sum += temp_value
                     elif connection.input_type == "HIDDEN" and temp_in_node in self.hidden_node_dict:
                         temp_in_value = self.neuron_hidden_nodes[self.hidden_node_dict[temp_in_node]].value
                         temp_weight = connection.weight
                         temp_bias = 0
                         #temp_bias = connection.bias
-                        temp_sum += temp_in_value * temp_weight + temp_bias
+                        temp_value = temp_in_value * temp_weight# + temp_bias
+                        temp_sum += temp_value
                     elif connection.input_type == "OUTPUT":
                         temp_in_value = self.neuron_output_nodes[temp_in_node].value
                         temp_weight = connection.weight
                         temp_bias = 0
                         #temp_bias = connection.bias
-                        temp_sum += temp_in_value * temp_weight + temp_bias
+                        temp_value = temp_in_value * temp_weight# + temp_bias
+                        temp_sum += temp_value
 
             node.value = self.activations.base_sigmoid(temp_sum)
 
         output = [0.0] * self.num_outputs
         for key, node in enumerate(self.neuron_output_nodes):
             temp_sum = 0.0
+            #print(node.input_connections)
+            #input('....')
             for connection in node.input_connections:
                 if connection.enabled:
                     temp_in_node = connection.in_node
@@ -270,22 +275,35 @@ class Genome:
                         temp_in_value = self.neuron_input_nodes[temp_in_node].value
                         temp_weight = connection.weight
                         temp_bias = connection.bias
-                        temp_sum += temp_in_value * temp_weight + temp_bias
+                        temp_value = temp_in_value * temp_weight# + temp_bias
+                        #print("Current node:", key)
+                        #print("connection",connection.printable())
+                        #print(temp_value)
+                        #print("weight", temp_weight)
+                        temp_sum += temp_value
+                        #print("temp_sum", temp_sum)
                     elif connection.input_type == "HIDDEN" and temp_in_node in self.hidden_node_dict:
                         #print("Temp in node: {}".format(temp_in_node))
                         #print(self.hidden_node_dict)
                         temp_in_value = self.neuron_hidden_nodes[self.hidden_node_dict[temp_in_node]].value
                         temp_weight = connection.weight
                         temp_bias = connection.bias
-                        temp_sum += temp_in_value * temp_weight + temp_bias
+                        temp_value = temp_in_value * temp_weight# + temp_bias
+                        temp_sum += temp_value
                     elif connection.input_type == "OUTPUT":
                         temp_in_value = self.neuron_output_nodes[temp_in_node].value
                         temp_weight = connection.weight
                         temp_bias = connection.bias
-                        temp_sum += temp_in_value * temp_weight + temp_bias
+                        temp_value = temp_in_value * temp_weight# + temp_bias
+                        temp_sum += temp_value
 
             node.value = self.activations.base_sigmoid(temp_sum)
+            if len(node.input_connections) == 0:
+                node.value = 0.0
+            #print("node_value",node.value)
+            #input("...")
             output[key] = node.value
+        #print("output", output)
         return output
 
 
@@ -343,7 +361,7 @@ class Node:
 
 class Population:
     ## TODO: Documentation.
-    def __init__(self, num_inputs, num_outputs, seed=None, frames_to_update=100,
+    def __init__(self, num_inputs, num_outputs, seed=None, frames_to_update=300,
                  population_size=300, max_num_species=15):
         ## Generator with seed. If a seed is given it should be
         ## deterministic.
@@ -489,6 +507,8 @@ class Population:
         self.best_genome = None
 
         self.max_num_species = max_num_species
+
+        self.extra_frames_earned = 0
 
     def setup(self):
         err = self.generate_initial_population()
@@ -694,13 +714,16 @@ class Population:
             num_output_connections = self.num_outputs
 
         input_values = self.generator.sample(range(0, self.num_inputs), num_input_connections)
+        #print(self.num_inputs)
+        #print(input_values)
+        #input("...")
         output_values = self.generator.sample(range(0, self.num_outputs), num_output_connections)
 
         input_type = "INPUT"
         output_type = "OUTPUT"
 
-        for input_node in range(num_input_connections):
-            for output_node in range(num_output_connections):
+        for input_node in input_values:
+            for output_node in output_values:
                 #print("INPUT", input_node, "OUTPUT", output_node)
                 ## Dealing with the innovation.
                 if ("INPUT", input_node, "OUTPUT", output_node) in self.generation_innovations:
@@ -1285,7 +1308,10 @@ class Population:
         ## Take data in.
 
         ## Process the data.
-        ##print("species list length: {}, genome length: {}".format(len(self.species_list), 0))
+        #print("Generation: {}, Species: {}, Genome:{}, Frame:{}".format(self.current_generation, self.current_species, self.current_genome, self.current_frame))
+        #for gene in self.species_list[self.current_species].genomes[self.current_genome].genes:
+        #    print(gene.printable())
+        #print("species list length: {}, genome length: {}".format(len(self.species_list), 0))
         output_data = self.species_list[self.current_species].genomes[self.current_genome].run_network(input_data)
         temp_genes = self.species_list[self.current_species].genomes[self.current_genome].genes
         #if len(temp_genes) > self.max_num_genes:
@@ -1297,6 +1323,7 @@ class Population:
         #    self.max_num_genes = len(temp_genes)
 
         ## Return the output of the current run.
+        #print('output_data', output_data)
         return output_data
 
     def update_position(self):
@@ -1338,8 +1365,10 @@ class Population:
         '''
 
     def check_location(self):
-        if self.current_frame == self.frames_to_update - 1:
+        if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
+            self.extra_frames_earned = 0
             self.genome_processed = True
+            print("Genome processed!")
 
             if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
                 self.species_processed = True

@@ -465,7 +465,7 @@ class bebna:
                 self.encoder_convolution_2.trainable = False
                 self.encoder_convolution_3.trainable = False
                 self.encoder_encoding_layer.trainable = False
-                
+
 
                 ## For looking at decoder output.
                 self.decoder_decoding_layer.trainable = False
@@ -511,7 +511,8 @@ class bebna:
             self.actuator_model.compile(optimizer='adam',
                     loss='categorical_crossentropy')
 
-            tf.initialize_all_variables().run()
+            #tf.initialize_all_variables().run()
+            tf.global_variables_initializer().run()
 
 
 
@@ -523,28 +524,28 @@ class bebna:
 
 def main():
 
-    envs = [('SonicTheHedgehog-Genesis','GreenHillZone.Act',('1','2','3')),
+    envs = [('SonicTheHedgehog-Genesis','GreenHillZone.Act',('1','3')),
             ('SonicTheHedgehog-Genesis','LabyrinthZone.Act',('1','2','3')),
             ('SonicTheHedgehog-Genesis','MarbleZone.Act',('1','2','3')),
-            ('SonicTheHedgehog-Genesis','ScrapBrainZone.Act',('1','2')),
-            ('SonicTheHedgehog-Genesis','SpringYardZone.Act',('1','2','3')),
-            ('SonicTheHedgehog-Genesis','StarLightZone.Act',('1','2','3')),
+            ('SonicTheHedgehog-Genesis','ScrapBrainZone.Act',('2')),
+            ('SonicTheHedgehog-Genesis','SpringYardZone.Act',('2','3')),
+            ('SonicTheHedgehog-Genesis','StarLightZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','AquaticRuinZone.Act',('1','2')),
-            ('SonicTheHedgehog2-Genesis','CasinoNightZone.Act',('1','2')),
+            ('SonicTheHedgehog2-Genesis','CasinoNightZone.Act',('1')),
             ('SonicTheHedgehog2-Genesis','ChemicalPlantZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','EmeraldHillZone.Act',('1','2')),
-            ('SonicTheHedgehog2-Genesis','HillTopZone.Act',('1','2')),
-            ('SonicTheHedgehog2-Genesis','MetropolisZone.Act',('1','2','3')),
+            ('SonicTheHedgehog2-Genesis','HillTopZone.Act',('1')),
+            ('SonicTheHedgehog2-Genesis','MetropolisZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','MysticCaveZone.Act',('1','2')),
             ('SonicTheHedgehog2-Genesis','OilOceanZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','AngelIslandZone.Act',('1','2')),
+            ('SonicAndKnuckles3-Genesis','AngelIslandZone.Act',('2')),
             ('SonicAndKnuckles3-Genesis','CarnivalNightZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','DeathEggZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','FlyingBatteryZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','HydrocityZone.Act',('1','2')),
+            ('SonicAndKnuckles3-Genesis','FlyingBatteryZone.Act',('1')),
+            ('SonicAndKnuckles3-Genesis','HydrocityZone.Act',('2')),
             ('SonicAndKnuckles3-Genesis','IcecapZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','LaunchBaseZone.Act',('1','2')),
-            ('SonicAndKnuckles3-Genesis','LavaReefZone.Act',('1','2')),
+            ('SonicAndKnuckles3-Genesis','LavaReefZone.Act',('2')),
             ('SonicAndKnuckles3-Genesis','MarbleGardenZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','MushroomHillZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','SandopolisZone.Act',('1','2'))]
