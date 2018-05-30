@@ -160,6 +160,7 @@ class bebna:
         self.num_unique_frames = 0
 
         self.map_tracker = MapTracker()
+        self.keyframe_counter = 0
 
 
     def animate_data(self, screen_frame, predicted_frame):
@@ -173,10 +174,9 @@ class bebna:
         self.image.set_data(self.encoder_images[:,:,:])
         #self.fig.canvas.draw()
 
-    def save_image(self, data, hash, info, f):
+    def save_image(self, data, hash):
         img_to_save = Image.fromarray(data, mode='RGB')
-        img_to_save.save('frames/' + str(hash) + '.bmp')
-        f[str(hash)] = info
+        img_to_save.save('test/' + str(hash) + '.bmp')
 
 
     def convert_to_train_space(self, data):
@@ -233,7 +233,14 @@ class bebna:
 
     def process_data(self, obs, info={}, f=None):
         if self.map_tracker.keystone_image is None:
-            self.map_tracker.keystone_image = obs
+            if self.keyframe_counter > 3:
+                self.map_tracker.keystone_image = obs
+                self.last_obs = obs
+            else:
+                self.keyframe_counter += 1
+            temp_reward = 0
+        else:
+            temp_reward = self.map_tracker.calculate_reward(self.last_obs, obs)
         genome_processed = False
         ## This was the old hash, we are now using distance hashes.
         #temp_hash = sha1(obs).hexdigest()
@@ -249,8 +256,12 @@ class bebna:
         ## First, encode the frame.
         encoded_frame = self.encoder_frozen_model.predict(np.expand_dims(obs, axis=0))
         encoded_frame *= (1.0/1000.0)
+        if self.map_tracker.last_encoded_frame is None:
+            self.map_tracker.last_encoded_frame = encoded_frame
+        self.map_tracker.encoded_frame = encoded_frame
         #print("np max",np.amax(encoded_frame))
         #print("np min",np.amin(encoded_frame))
+
 
         ## Add this observation to the set of ones seen.
         self.add_observation(obs, temp_hash, info, f)
@@ -260,6 +271,21 @@ class bebna:
                     ## We have seen a very similar screen before.
                     temp_hash = hash
                     break
+
+        #last_img = self.observations[1]
+        #current_image = self.observations[0]
+        print("Frame reward: {}".format(temp_reward))
+        self.current_fitness += temp_reward
+        self.active_reward_fitness += temp_reward
+
+        print("Total reward: {}".format(self.current_fitness))
+        if self.active_reward_fitness > 30000.0:
+            self.NEAT.extra_frames_earned += (self.active_reward_fitness // 30000) * 8
+            self.active_reward_fitness %= 30000.0
+            print("Nuber frames added: {}".format(self.NEAT.extra_frames_earned))
+
+
+        '''
         if temp_hash in self.observation_hashes:
             self.current_fitness += 1000 / self.observation_hashes[temp_hash]
             self.active_reward_fitness += 1000 / self.observation_hashes[temp_hash]
@@ -274,6 +300,8 @@ class bebna:
         if self.active_reward_fitness > 1000.0:
             self.NEAT.extra_frames_earned += (self.active_reward_fitness // 1000) * 10
             self.active_reward_fitness %= 1000.0
+        '''
+
 
 
 
@@ -297,10 +325,8 @@ class bebna:
             ## Check if we need to start a new generation.
             self.NEAT.check_location()
             if self.NEAT.genome_processed:
-                self.NEAT.apply_reward(self.current_fitness)
-                self.current_fitness = 0.0
-                self.active_reward_fitness = 0.0
-                #genome_processed = True
+                genome_processed = True
+                self.reset()
             if self.NEAT.generation_processed:
                 self.NEAT.process_new_generation()
 
@@ -327,8 +353,19 @@ class bebna:
         ##print("output_data: {}".format(output_data))
         self.last_action = output_data
         self.last_hash = temp_hash
+        self.last_obs = obs
+        self.map_tracker.last_encoded_frame = encoded_frame
         return output_data, genome_processed
 
+    def reset(self):
+        self.NEAT.apply_reward(self.current_fitness)
+        self.current_fitness = 0.0
+        self.active_reward_fitness = 0.0
+        self.keyframe_counter = 0
+        self.map_tracker.reset()
+        self.observation_hashes = {}
+        self.num_unique_frames = 0
+        self.NEAT.extra_frames_earned = 0
 
     def add_observation(self, obs, temp_hash, info, f):
         ## Update the actuator model given the previous output and the current
@@ -699,56 +736,80 @@ class MDN(tf.keras.layers.Layer):
 
 class MapTracker:
     def __init__(self, keystone_image=None, image_height=56, image_width=80):
-
+        self.last_encoded_frame = None
         self.keystone_image = keystone_image
         self.current_x_y_coords = (0.0, 0.0)
         self.reward_for_pixel = 10.0
         self.pixels_seen = np.zeros(shape=(10001,10001), dtype=int)
+
+        self.image_height = image_height
+        self.image_width = image_width
         ## Put all the initial pixels in the dictionary.
         #print(image_height+10000 // 2)
-        for i in range(image_height+10000 // 2):
-            for j in range(image_width+10000 // 2):
-                self.pixels_seen[j][i] = 1
-                self.pixels_seen[-j][i] = 1
-                self.pixels_seen[j][-i] = 1
-                self.pixels_seen[j][i] = 1
+        for i in range(image_height // 2):
+            for j in range(image_width // 2):
+                self.pixels_seen[j + 5000][i + 5000] = 1
+                self.pixels_seen[-j + 5000][i + 5000] = 1
+                self.pixels_seen[j + 5000][-i + 5000] = 1
+                self.pixels_seen[j + 5000][i + 5000] = 1
 
 
     def reset(self):
+        self.keystone_image = None
         self.current_x_y_coords = (0.0, 0.0)
         self.pixels_seen.fill(0)
-        for i in range(image_height+10000 // 2):
-            for j in range(image_width+10000 // 2):
-                self.pixels_seen[j][i] = 1
-                self.pixels_seen[-j][i] = 1
-                self.pixels_seen[j][-i] = 1
-                self.pixels_seen[j][i] = 1
+        for i in range(self.image_height// 2):
+            for j in range(self.image_width // 2):
+                self.pixels_seen[j + 5000][i + 5000] = 1
+                self.pixels_seen[-j + 5000][i + 5000] = 1
+                self.pixels_seen[j + 5000][-i + 5000] = 1
+                self.pixels_seen[j + 5000][i + 5000] = 1
 
-    def caluclate_reward(self, last_img, new_img):
+    def calculate_reward(self, last_img, new_img):
         ## Scale the images down.
-        last_img_resized = cv2.resize(last_img, dsize=(image_height, image_width), interpolation=cv2.INTER_CUBIC)
-        new_img_resized = cv2.resize(new_img, dsize=(image_height, image_width), interpolation=cv2.INTER_CUBIC)
-        if image_hash.whash(new_img_resized) - imagehash.whash(self.keystone_image) < 4:
+        last_img_resized = cv2.resize(last_img, dsize=(self.image_width, self.image_height), interpolation=cv2.INTER_CUBIC)
+        new_img_resized = cv2.resize(new_img, dsize=(self.image_width, self.image_height), interpolation=cv2.INTER_CUBIC)
+        self.save_image(last_img, "last_img")
+        self.save_image(new_img, "new_img")
+        #input("...")
+        if imagehash.whash(Image.fromarray(new_img_resized, mode='RGB')) == imagehash.whash(Image.fromarray(self.keystone_image, mode='RGB')):
             self.current_x_y_coords = (0.0, 0.0)
-            x_shift_int = 0
-            y_shift_int = 0
+            new_x = 0
+            new_y = 0
         else:
-            transform_matrix = cv2.estimateRigidTransform(last_img_resized, new_img_resized)
-            x_shift = transform_matrix[0][2]
+            #print(last_img_resized.dtype, new_img_resized.dtype)
+            try:
+                transform_matrix = cv2.estimateRigidTransform(new_img.astype('uint8'), last_img.astype('uint8'), False)
+                #print(last_img_resized)
+                print(transform_matrix)
+                x_shift = transform_matrix[0][2]
+            except:
+                #input("... transform is none")
+                return 0.0
+            if x_shift < 1.0 and x_shift > -1.0:
+                x_shift = 0
             y_shift = transform_matrix[1][2]
+            if y_shift < 1.0 and y_shift > -1.0:
+                y_shift = 0
             new_x = self.current_x_y_coords[0] + x_shift
-            new_y = self.current_x_y_coords[1] + y_shfit
+            new_y = self.current_x_y_coords[1] + y_shift
             self.current_x_y_coords = (new_x, new_y)
-        x_shift_int = int(floor(new_x) - image_width / 2)
-        y_shift_int = int(floor(new_y) - image_height / 2)
+        x_shift_int = int(math.floor(new_x) - self.image_width / 2)
+        y_shift_int = int(math.floor(new_y) - self.image_height / 2)
 
         reward = 0.0
-        for i in range(image_height):
-            for j in range(image_width):
+        for i in range(self.image_height):
+            for j in range(self.image_width):
                 self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int] += 1
-                reward += self.reward_for_pixel / self.pixels_seen[j][i]
+                reward += self.reward_for_pixel / self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int]
 
+        print("X shift: {}, Y shift: {}".format(self.current_x_y_coords[0], self.current_x_y_coords[1]))
         return reward
+
+
+    def save_image(self, data, hash):
+        img_to_save = Image.fromarray(data, mode='RGB')
+        img_to_save.save('test/' + str(hash) + '.bmp')
 
 
 def main():
@@ -792,12 +853,14 @@ def main():
                 action, genome_processed = model.process_data(obs)
                 #obs, rew, done, info = env.step(env.action_space.sample())
                 obs, rew, done, info = env.step(action)
+                print(info)
                 #print('Info: {}'.format(info))
                 #model.animate_data(obs, obs)
                 env.render()
                 if done or genome_processed:
                     obs = env.reset()
-                    model.NEAT.extra_frames_earned = -10000000.0
+                    model.NEAT.extra_frames_earned = 0
+                    model.reset()
 
 
 if __name__ == '__main__':

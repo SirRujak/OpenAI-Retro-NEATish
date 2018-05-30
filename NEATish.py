@@ -1368,7 +1368,7 @@ class Population:
         if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
             self.extra_frames_earned = 0
             self.genome_processed = True
-            print("Genome processed!")
+            #print("Genome processed!")
 
             if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
                 self.species_processed = True

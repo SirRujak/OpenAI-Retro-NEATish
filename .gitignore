@@ -1,1 +1,4 @@
 frames/
+_pycache_
+*.pyc
+test/
