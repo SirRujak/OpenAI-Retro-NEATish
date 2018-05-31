@@ -63,7 +63,8 @@ class bebna_encoder:
                         (2,4,1,3), (2,4,3,1), (2,3,4,1), (2,3,1,4)
                         ]
         num_puzzle_copies = 24
-        end_of_test_set = len(self.hash_list) // self.train_test_split
+        #end_of_test_set = len(self.hash_list) // self.train_test_split
+        end_of_test_set = 100
         batch_images = np.zeros((batch_size, 224, 320, 3))
         batch_puzzle_images = np.zeros((batch_size, 224, 320, 3))
         temp_holder_for_quadrants = np.zeros((4,112,160,3))
@@ -75,7 +76,7 @@ class bebna_encoder:
             current_index += batch_size
             if batch_type == "test":
                 if current_index > end_of_test_set:
-                    current_index = 0
+                    current_index = 0 + random.randint(0, batch_size)
             else:
                 if current_index > len(self.hash_list) - batch_size:
                     current_index = end_of_test_set
@@ -124,7 +125,7 @@ class bebna_encoder:
         ## We want to run for 5 epochs.
         valid_generator = self.generate_batch('test', 32)
         train_generator = self.generate_batch('train',32)
-        for i in range(len(self.hash_list)):
+        for i in range(len(self.hash_list)*50):
             batch_images, batch_puzzle_images, batch_puzzle_labels = train_generator.__next__()
             '''
             self.puzzle_plus_decoder_model.fit(
@@ -218,16 +219,16 @@ class bebna_encoder:
                     8960)(self.decoder_encoder_layer)
             self.decoder_reshaped = tf.keras.layers.Reshape(
                     target_shape=(7, 10, 128))(self.decoder_decoding_layer)
-            self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(256,
+            self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(2048,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_reshaped)
-            self.decoder_deconvolution_1_2 = tf.keras.layers.Conv2DTranspose(256,
+            self.decoder_deconvolution_1_2 = tf.keras.layers.Conv2DTranspose(1024,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_reshaped)
-            self.decoder_deconvolution_2 = tf.keras.layers.Conv2DTranspose(128,
+            self.decoder_deconvolution_2 = tf.keras.layers.Conv2DTranspose(512,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_deconvolution_1)
-            self.decoder_deconvolution_2_2 = tf.keras.layers.Conv2DTranspose(128,
+            self.decoder_deconvolution_2_2 = tf.keras.layers.Conv2DTranspose(256,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_deconvolution_1_2)
             self.decoder_tower_output = tf.keras.layers.concatenate([self.decoder_deconvolution_2, self.decoder_deconvolution_2_2])

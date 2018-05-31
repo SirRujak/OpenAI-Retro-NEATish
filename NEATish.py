@@ -374,6 +374,7 @@ class Population:
             self.seed = None
             self.generator = random.Random()
 
+
         ## Set the population size.
         self.population_size = population_size
         ## Constants used to separate genomes into species.
@@ -436,6 +437,40 @@ class Population:
         ## culling, how well we have been progressing recently,
         ## and which stage we are on.
 
+        ## The maximum amount a mutation can perturb a weight.
+        self.max_weight_perturbation = 0.5
+        ## The maximum amount a mutation can perturb a bias.
+        self.max_bias_perturbation = 1.0
+
+        ## The maximum value of a replaced weight.
+        self.max_weight_replaced = 1.0
+        ## The maximum value of a replaced bias.
+        self.max_bias_replaced = 0.5
+
+        ## Max number of frames to use per network run.
+        self.frames_to_update = frames_to_update
+
+        ## Number of inputs to the network.
+        self.num_inputs = num_inputs + 1
+
+        ## Number of outputs for the network.
+        self.num_outputs = num_outputs
+
+        ## For testing. TODO: remove this eventually.
+        self.max_num_genes = 0
+
+
+        self.max_num_species = max_num_species
+
+
+    def setup(self, previous_paths=None):
+
+        if previous_paths is None:
+            self.previous_path = []
+        else:
+            self.previous_path = previous_path
+        self.current_position = [0.0, 0.0]
+
         ## This is used to track each new innovation in a generation.
         ## If it has been found before, give both genes the same innovation
         ## number. Each gene will be given as
@@ -455,22 +490,6 @@ class Population:
         ## Used for finding the number of each species to be created.
         self.total_adjusted_fitness = 0.0
 
-        ## The maximum amount a mutation can perturb a weight.
-        self.max_weight_perturbation = 0.5
-        ## The maximum amount a mutation can perturb a bias.
-        self.max_bias_perturbation = 1.0
-
-        ## The maximum value of a replaced weight.
-        self.max_weight_replaced = 1.0
-        ## The maximum value of a replaced bias.
-        self.max_bias_replaced = 0.5
-
-        ## Number of inputs to the network.
-        self.num_inputs = num_inputs + 1
-
-        ## Number of outputs for the network.
-        self.num_outputs = num_outputs
-
         ## Current generation.
         self.current_generation = 0
 
@@ -486,8 +505,6 @@ class Population:
         ## Number of frames that have been processed with a network.
         self.current_frame = 0
 
-        ## Max number of frames to use per network run.
-        self.frames_to_update = frames_to_update
 
         self.species_counter = 0
 
@@ -501,16 +518,13 @@ class Population:
         self.species_processed = False
         self.generation_processed = False
 
-        ## For testing. TODO: remove this eventually.
-        self.max_num_genes = 0
 
         self.best_genome = None
 
-        self.max_num_species = max_num_species
-
         self.extra_frames_earned = 0
+        #########################
 
-    def setup(self):
+
         err = self.generate_initial_population()
         self.generation_processed = False
         if err is not None:
@@ -1312,8 +1326,14 @@ class Population:
         #for gene in self.species_list[self.current_species].genomes[self.current_genome].genes:
         #    print(gene.printable())
         #print("species list length: {}, genome length: {}".format(len(self.species_list), 0))
-        output_data = self.species_list[self.current_species].genomes[self.current_genome].run_network(input_data)
-        temp_genes = self.species_list[self.current_species].genomes[self.current_genome].genes
+        ## If we are still going through the old path, just get the data from the old genome.
+        if len(self.previous_path) == 0:
+            ## Otherwise continue learning in this population.
+            output_data = self.species_list[self.current_species].genomes[self.current_genome].run_network(input_data)
+            temp_genes = self.species_list[self.current_species].genomes[self.current_genome].genes
+        else:
+            #print(self.previous_path)
+            output_data = self.previous_path[0][0].run_network(input_data)
         #if len(temp_genes) > self.max_num_genes:
         #    print(len(temp_genes))
         #    for gene in temp_genes:
@@ -1365,16 +1385,29 @@ class Population:
         '''
 
     def check_location(self):
-        if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
-            self.extra_frames_earned = 0
-            self.genome_processed = True
-            #print("Genome processed!")
+        if len(self.previous_path) == 0:
+            if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
+                self.extra_frames_earned = 0
+                self.genome_processed = True
+                #print("Genome processed!")
 
-            if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
-                self.species_processed = True
-                if self.current_species == len(self.species_list) - 1:
-                    #print("test45")
-                    self.generation_processed = True
+                if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
+                    self.species_processed = True
+                    if self.current_species == len(self.species_list) - 1:
+                        #print("test45")
+                        self.generation_processed = True
+        else:
+            ## Check if we need to move on from this part of the path.
+            x_val = self.previous_path[0][1][0]
+            y_val = self.previous_path[0][1][1]
+            x_high_val = x_val + abs(x_val / 25.0)
+            x_low_val = x_val - abs(x_val / 25.0)
+            y_high_val = y_val + abs(y_val / 25.0)
+            y_low_val = y_val - abs(y_val / 25.0)
+            ## Check if our current position is within four percent of the current goal.
+            if current_position[0] < x_high_val and current_position[0] > x_low_val:
+                if current_position [1] < y_high_val and current_position > y_low_val:
+                    self.previous_path.pop(0)
 
 
 

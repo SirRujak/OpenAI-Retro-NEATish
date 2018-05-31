@@ -128,10 +128,10 @@ class bebna:
         self.img_height = 224
         self.img_width = 320
         self.double_height = 448
-        self.encoder_images = np.zeros((self.double_height, self.img_width, 3))
-        plt.ion()
-        self.fig, self.ax = plt.subplots(1,1)
-        self.image = self.ax.imshow(self.encoder_images[:, :, :], animated=True)
+        #self.encoder_images = np.zeros((self.double_height, self.img_width, 3))
+        #plt.ion()
+        #self.fig, self.ax = plt.subplots(1,1)
+        #self.image = self.ax.imshow(self.encoder_images[:, :, :], animated=True)
         #self.fig.canvas.draw()
 
 
@@ -141,12 +141,17 @@ class bebna:
         #screen_frame = screen_frame[:,:,::-1]
         predicted_frame = predicted_frame[:,:,::-1]
         ## Set top half of the encoder images to be the input frame.
-        self.encoder_images[:self.img_height,:,:] = screen_frame.astype(int)
+        self.encoder_images[:self.img_height,:,:] = screen_frame
         self.encoder_images[self.img_height:, :,:] = screen_frame#predicted_frame
         self.image.set_data(self.encoder_images[:,:,:])
         #self.fig.canvas.draw()
 
     def save_image(self, data, hash, info, f):
+        #self.animate_data(data, data)
+        data = data * 255.0
+        data = data.astype('uint8')
+
+        #print(data.dtype)
         img_to_save = Image.fromarray(data, mode='RGB')
         img_to_save.save('frames/' + str(hash) + '.bmp')
         f[str(hash)] = info
@@ -205,21 +210,12 @@ class bebna:
         return new_data
 
     def process_data(self, obs, info={}, f=None):
-        ## This was the old hash, we are now using distance hashes.
-        #temp_hash = sha1(obs).hexdigest()
-        ## New hashing method.
-        temp_hash = imagehash.average_hash(Image.fromarray(obs, mode='RGB'))
-        ## We want to do random things for a bit, but not too long. Then move
-        ## on to actually predicting data.
+        #input('...')
+        temp_hash = imagehash.whash(Image.fromarray(obs, mode='RGB'))
         if self.current_random_actions < self.initial_random_actions:
             output_data = self.env.action_space.sample()
             self.current_random_actions += 1
         else:
-            ## TODO: Actually do something :P
-            #output_data = self.actuator_model.predict(np.expand_dims(obs, axis=0))[0]
-            ##print('output_data final: {}'.format(output_data))
-            #output_data = np.argmax(output_data)
-            #output_data = self.convert_to_action_space(output_data)
 
             if np.array_equal(self.last_action, np.array([1, 0, 0, 0, 0, 0, 0,1, 0, 0, 0, 0])):
                 output_data = np.array([0, 0, 0, 0, 0, 0, 0,
@@ -233,122 +229,25 @@ class bebna:
         ## Update the network, save the output from this, and return the new set
         ## of instructions.
         self.add_observation(obs, temp_hash, info, f)
-        if temp_hash in self.observation_hashes:
-            self.observation_hashes[temp_hash] += 1
-        else:
-            self.observation_hashes[temp_hash] = 1
-        ##print("output_data: {}".format(output_data))
-        self.last_action = output_data
-        self.last_hash = temp_hash
         return output_data
 
 
     def add_observation(self, obs, temp_hash, info, f):
         ## Update the actuator model given the previous output and the current
         ## screen.
-        self.num_observations += 1
-        np.roll(self.observations, 1)
-        np.copyto(self.observations[0], obs)
-        found_new, temp_index = self.new_observation_check(temp_hash, obs, info, f)
-        if found_new:
-            np.copyto(self.unique_observations[temp_index], obs)
-            #self.decoder_model.fit(self.unique_observations,
-            #        self.unique_observations, verbose=0)
-        elif self.num_observations < 16 :
-            ## Train the autoencoder with our unique observations.
-            np.roll(self.unique_observations, 1)
-            np.copyto(self.unique_observations[0], obs)
-            #self.decoder_model.fit(self.unique_observations,
-            #        self.unique_observations, epochs=2, verbose=0)
-        #self.decoder_model.fit(self.unique_observations,
-        #        self.unique_observations, epochs=2, verbose=0)
-        #self.animate_data(obs, self.decoder_eval_model.predict(np.expand_dims(obs, axis=0))[0].astype(int))
-
-
-        temp_hash = self.last_hash
-        temp_action = np.array(self.convert_to_train_space(self.last_action))
-        if temp_hash in self.observation_hashes:
-            ##temp_action = 1 - temp_action
-            temp_index = np.argmax(temp_action)
-            new_action = np.zeros(10)
-            for i in self.opposites[temp_index]:
-                new_action[i] = 1
-            temp_action = new_action
-        ##print("last_action: {}".format(self.last_action))
-        ##print("last_train: {}".format(temp_action))
-        ##print("last_train shape: {}".format(temp_action.shape))
-        self.actuator_model.fit(np.expand_dims(self.observations[1], axis=0), np.expand_dims(temp_action, axis=0),verbose=0)
-
-
-    def mse(self, index):
-        ## Use the frame in slot zero of self.observations and the index item
-        ## in self.unique_observations.
-        return ((self.observations[0] -
-               self.unique_observations[index]) ** 2).mean(axis=None)
-
-    def mse_first(self, index_1, index_2):
-        return ((self.unique_observations[index_1] -
-               self.unique_observations[index_2]) ** 2).mean(axis=None)
+        self.new_observation_check(temp_hash, obs, info, f)
 
 
     def new_observation_check(self, current_hash, obs, info, f):
         ## Only check if we have seen 16 observations.
-        if self.num_observations > 16:
-            ## We need to check how different our observation is.
-            ## Keep track of the variation between all of them as we go.
-            ## If we run across at least one that has a lower total variation
-            ## then return the index of the lowest total variation and True.
-            ## TODO: Do this.
-            ## Check if it is a new observation. We don't need to check for old
-            ## ones.
-            if current_hash not in self.observation_hashes:
-                self.save_image(obs, current_hash, info, f)
-                for i in range(16):
-                    self.uniqueness_check[i] = self.mse(i)
-                temp_uniqueness = np.sum(self.uniqueness_check)
-                current_min_uniqueness_index = np.argmin(self.uniqueness)
-                current_min_uniqueness = self.uniqueness[
-                        current_min_uniqueness_index]
-                if temp_uniqueness > current_min_uniqueness:
-                    ## We found one that is less unique than our current frame.
-                    ## Replace the uniquness value in the system minux the
-                    ## mse between the new and old frame.
-                    self.uniqueness[
-                            current_min_uniqueness_index] = temp_uniqueness - self.uniqueness_check[current_min_uniqueness_index]
-                    for i in range(16):
-                        ## Replace the difference values for each other frame.
-                        if i != current_min_uniqueness_index:
-                            self.similarity[i][current_min_uniqueness_index] = self.uniqueness_check[i]
-                    return(True, current_min_uniqueness_index)
-            return (False, 0)
-        else:
-            ## We should just put the new item in the unique_observations array.
-            if self.num_observations == 16:
-                ## We have now filled up the unique matrix. Calculate
-                ## the differences between each unique observationself.
-                for temp_key, temp_observation in enumerate(
-                        self.unique_observations):
-                    for i in range(temp_key, self.unique_observations.shape[0]):
-                        temp_similarity = self.mse_first(temp_key, i)
-                        self.similarity[temp_key][i] = temp_similarity
-                        self.similarity[i][temp_key] = temp_similarity
-                for i in range(16):
-                    self.uniqueness[i] = np.sum(self.similarity[i])
-            return (False, 0)
-
-    def check_for_uniqueness(self, obs):
-        for item in self.observations[-10:]:
-            if np.array_equal(obs, item):
-                return True
-        return False
-    '''
-    def uniqueness_loss(self, X_true, X_pred):
-        last_hash = self.last_hash
-        temp_loss = 0
-        if last_hash in self.observation_hashes:
-            temp_loss += 10.0 * self.observation_hashes[last_hash]
-        return tf.constant(temp_loss, dtype=float32)
-    '''
+        found_similar = False
+        for temp_hash in self.observation_hashes:
+            #print(temp_hash - current_hash)
+            if temp_hash - current_hash < 18:
+                found_similar = True
+        if not found_similar:
+            self.observation_hashes[current_hash] = 0
+            self.save_image(obs, current_hash, info, f)
 
     def make_encoder_decoder(self):
         with self.session as sess:
@@ -495,7 +394,7 @@ class bebna:
             ## Actuator code.
             self.actuator_input = tf.keras.layers.Input(shape=(224, 320, 3,),
                     name='actuator_input')
-            self.actuator_encoded = self.encoder_frozen_model(self.actuator_input)
+            self.actuator_encoded = self.encoder_model(self.actuator_input)
             self.actuator_dense_1 = tf.keras.layers.Dense(64)(
                     self.actuator_encoded)
             self.actuator_dense_2 = tf.keras.layers.Dense(32)(
@@ -578,7 +477,7 @@ def main():
                     obs = env.reset()
             env.close()
 
-    with open("frame_data.json","a") as temp_file:
+    with open("frame_data.json","w") as temp_file:
         json.dump(f, temp_file)
     '''
     env = make(game='SonicAndKnuckles3-Genesis', state='SandopolisZone.Act2')
