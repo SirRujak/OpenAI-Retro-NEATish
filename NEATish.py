@@ -467,8 +467,10 @@ class Population:
 
         if previous_paths is None:
             self.previous_path = []
+            self.previous_path_master = []
         else:
-            self.previous_path = previous_path
+            self.previous_path = previous_paths
+            self.previous_path_master = copy.deepcopy(previous_paths)
         self.current_position = [0.0, 0.0]
 
         ## This is used to track each new innovation in a generation.
@@ -1389,6 +1391,8 @@ class Population:
             if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
                 self.extra_frames_earned = 0
                 self.genome_processed = True
+                if len(self.previous_path_master) > 0:
+                    self.previous_path = copy.deepcopy(self.previous_path_master)
                 #print("Genome processed!")
 
                 if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
