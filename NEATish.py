@@ -362,7 +362,7 @@ class Node:
 class Population:
     ## TODO: Documentation.
     def __init__(self, num_inputs, num_outputs, seed=None, frames_to_update=300,
-                 population_size=300, max_num_species=15):
+                 population_size=300, max_num_species=15, stagnant_time=15):
         ## Generator with seed. If a seed is given it should be
         ## deterministic.
         self.generator = random.Random()
@@ -393,7 +393,7 @@ class Population:
         ## If species have been stagnant for this amount of time
         ## that species is no longer allowed to reproduce. Stagnant
         ## is defined by no increase in fitness.
-        self.stagnant_time = 15
+        self.stagnant_time = stagnant_time
 
         ## Number of members of each species to copy champion with
         ## no changes.
@@ -522,6 +522,7 @@ class Population:
 
 
         self.best_genome = None
+        self.best_genome_end = None
 
         self.extra_frames_earned = 0
         #########################
@@ -531,6 +532,8 @@ class Population:
         self.generation_processed = False
         if err is not None:
             print("Error setting up population. {}".format(err))
+
+        self.path_position = 0
 
     def new_innovation(self):
         temp_innovation = self.global_innovation
@@ -1386,32 +1389,49 @@ class Population:
             self.current_frame = 0
         '''
 
-    def check_location(self):
+    def check_location(self, current_position=None):
         if len(self.previous_path) == 0:
+            try:
+                if self.start_printing_location:
+                    print("Current frame: {}.".format(self.current_frame))
+                    print("Frames to update: {}. Extra frames earned: {}.".format(self.frames_to_update, self.extra_frames_earned))
+            except:
+                pass
             if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
                 self.extra_frames_earned = 0
                 self.genome_processed = True
                 if len(self.previous_path_master) > 0:
                     self.previous_path = copy.deepcopy(self.previous_path_master)
+                self.path_position = 0
                 #print("Genome processed!")
+                #input("...")
 
                 if self.current_genome == len(self.species_list[self.current_species].genomes) - 1:
                     self.species_processed = True
                     if self.current_species == len(self.species_list) - 1:
                         #print("test45")
                         self.generation_processed = True
+            self.last_location = copy.deepcopy(current_position)
         else:
             ## Check if we need to move on from this part of the path.
             x_val = self.previous_path[0][1][0]
             y_val = self.previous_path[0][1][1]
-            x_high_val = x_val + abs(x_val / 25.0)
-            x_low_val = x_val - abs(x_val / 25.0)
-            y_high_val = y_val + abs(y_val / 25.0)
-            y_low_val = y_val - abs(y_val / 25.0)
+            x_high_val = x_val + 50.0
+            x_low_val = x_val - 50.0
+            y_high_val = y_val + 50.0
+            y_low_val = y_val - 50.0
+            #print('x: {}, y: {}, x_high: {}, x_low: {}, y_high: {}, y_low: {}'.format(x_val, y_val, x_high_val, x_low_val, y_high_val, y_low_val))
             ## Check if our current position is within four percent of the current goal.
+            #input('x: {}, y: {}, x_high: {}, x_low: {}, y_high: {}, y_low: {}'.format(x_val, y_val, x_high_val, x_low_val, y_high_val, y_low_val))
             if current_position[0] < x_high_val and current_position[0] > x_low_val:
-                if current_position [1] < y_high_val and current_position > y_low_val:
+                if current_position[1] < y_high_val and current_position[1] > y_low_val:
+                    #print(current_position, self.previous_path)
                     self.previous_path.pop(0)
+                    self.path_position += 1
+                    self.current_frame = 0
+                    self.start_printing_location = True
+                    print("Moving on to new genome!")
+                    #input('...')
 
 
 
@@ -1420,6 +1440,8 @@ class Population:
         if reward > self.highest_fitness:
             self.highest_fitness = reward
             self.best_genome = copy.deepcopy(self.species_list[self.current_species].genomes[self.current_genome])
+            self.best_genome_end = self.last_location
+            #input("Last location: {}".format(self.best_genome_end))
 
     def print_current(self):
         current_genome = self.species_list[self.current_species].genomes[self.current_genome]

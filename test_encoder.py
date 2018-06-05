@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
 decoder_model = tf.keras.models.load_model('models/decoder_model.h5')
-input_img = np.asarray(Image.open('frames/' + '0b4b0b0fffff0888' + '.bmp')).astype(np.float32) / 255.0
+input_img = np.asarray(Image.open('frames/' + '00f81c9e1f1e3d7c' + '.bmp')).astype(np.float32) / 255.0
 decoded_img = decoder_model.predict(np.expand_dims(input_img, axis=0))[0]
 
 img_height = 224

@@ -20,17 +20,18 @@ import math
 import cv2
 
 import NEATish
+import copy
 
 
 
 class bebna:
     def __init__(self, initial_random_actions=256, num_actions=12,
-            num_frames_before_show=100, encoding_layer_depth=256):
+            num_frames_before_show=100, encoding_layer_depth=560):
         self.initial_random_actions = initial_random_actions
         self.num_frames_before_show = num_frames_before_show
         self.current_frame = 0
         self.num_actions = num_actions
-        self.num_learning_actions = 10
+        self.num_learning_actions = 9
         self.encoding_layer_depth = encoding_layer_depth
 
         self.current_fitness = 0.0
@@ -55,11 +56,11 @@ class bebna:
         self.right_train = 2
         self.left_down_train = 3
         self.right_down_train = 4
-        self.down_train = 5
-        self.down_b_train = 6
-        self.left_b_train = 7
-        self.right_b_train = 8
-        self.b_train = 9
+        self.down_b_train = 5
+        self.left_b_train = 6
+        self.right_b_train = 7
+        self.b_train = 8
+        self.down_train = 9
         '''
         self.opposites = {
                 self.left_train:[self.right_train,
@@ -118,7 +119,7 @@ class bebna:
     def setup(self, env, observation_hashes=None):
         self.env = env
 
-        self.NEAT = NEATish.Population(self.encoding_layer_depth, self.num_learning_actions, 42, 60)
+        self.NEAT = NEATish.Population(self.encoding_layer_depth, self.num_learning_actions, 'fortytwo', 60, 30, 5, 5)
 
         self.last_action = self.env.action_space.sample()
         self.last_hash = None
@@ -161,6 +162,11 @@ class bebna:
 
         self.map_tracker = MapTracker()
         self.keyframe_counter = 0
+
+        self.last_reward = 0
+        self.current_path = []
+
+        self.new_problem_completed = False
 
 
     def animate_data(self, screen_frame, predicted_frame):
@@ -210,6 +216,7 @@ class bebna:
     def convert_to_action_space(self, data):
         ## Data is one integer.
         new_data = [0]*12
+        #print(data)
         if data == self.empty_train:
             pass
         if data == self.left_train:
@@ -223,6 +230,7 @@ class bebna:
             new_data[self.right_action] = True
             new_data[self.down_action] = True
         if data == self.down_train:
+            print('Oops, down...')
             new_data[self.down_action] = True
         if data == self.down_b_train:
             new_data[self.down_action] = True
@@ -231,7 +239,8 @@ class bebna:
             new_data[self.b_action] = True
         return new_data
 
-    def process_data(self, obs, info={}, f=None):
+    def process_data(self, obs, info=None, f=None, reward=None):
+        genome_processed = False
         if self.map_tracker.keystone_image is None:
             if self.keyframe_counter > 3:
                 self.map_tracker.keystone_image = obs
@@ -240,8 +249,14 @@ class bebna:
                 self.keyframe_counter += 1
             temp_reward = 0
         else:
-            temp_reward = self.map_tracker.calculate_reward(self.last_obs, obs)
-        genome_processed = False
+            if len(self.NEAT.previous_path) > 0:
+                processing_old_paths = True
+            else:
+                processing_old_paths = False
+            temp_reward, new_problem_completed = self.map_tracker.calculate_reward(self.last_obs, obs, reward, self.current_path, self.NEAT, processing_old_paths, info)
+            if new_problem_completed:
+                #genome_processed = True
+                self.new_problem_completed = True
         ## This was the old hash, we are now using distance hashes.
         #temp_hash = sha1(obs).hexdigest()
         ## New hashing method.
@@ -249,7 +264,7 @@ class bebna:
         if self.last_hash:
             if temp_hash - self.last_hash < 10:
                 temp_hash = self.last_hash
-                self.NEAT.extra_frames_earned -= 1
+                #self.NEAT.extra_frames_earned -= 1
         ## We want to do random things for a bit, but not too long. Then move
         ## on to actually predicting data.
 
@@ -274,15 +289,15 @@ class bebna:
 
         #last_img = self.observations[1]
         #current_image = self.observations[0]
-        print("Frame reward: {}".format(temp_reward))
+        #print("Frame reward: {}".format(temp_reward))
         self.current_fitness += temp_reward
         self.active_reward_fitness += temp_reward
 
-        print("Total reward: {}".format(self.current_fitness))
-        if self.active_reward_fitness > 30000.0:
-            self.NEAT.extra_frames_earned += (self.active_reward_fitness // 30000) * 8
-            self.active_reward_fitness %= 30000.0
-            print("Nuber frames added: {}".format(self.NEAT.extra_frames_earned))
+        #print("Total reward: {}".format(self.current_fitness))
+        if self.active_reward_fitness > 100000.0:
+            self.NEAT.extra_frames_earned += (self.active_reward_fitness // 100000) * 8
+            self.active_reward_fitness %= 100000.0
+            #print("Nuber frames added: {}".format(self.NEAT.extra_frames_earned))
 
 
         '''
@@ -323,12 +338,16 @@ class bebna:
 
             output = self.NEAT.process_data(encoded_frame[0])
             ## Check if we need to start a new generation.
-            self.NEAT.check_location()
+            self.NEAT.check_location(self.map_tracker.current_x_y_coords)
+            generation_processed = False
             if self.NEAT.genome_processed:
                 genome_processed = True
                 self.reset()
             if self.NEAT.generation_processed:
+                generation_processed = True
                 self.NEAT.process_new_generation()
+                print('Generation processed.')
+                #input('Generation processed...')
 
 
             ## Start passing the encoded_frame into the NEAT implementation.
@@ -355,9 +374,19 @@ class bebna:
         self.last_hash = temp_hash
         self.last_obs = obs
         self.map_tracker.last_encoded_frame = encoded_frame
+        if self.new_problem_completed and generation_processed:
+            self.new_problem_completed = False
+            temp_genome = copy.deepcopy(self.NEAT.best_genome)
+            old_path_info = (temp_genome, (self.NEAT.best_genome_end[0], self.NEAT.best_genome_end[1]))
+            self.current_path.append(old_path_info)
+            ## Need to reset the NEAT population and add on the current path data.
+            current_path_copy = copy.deepcopy(self.current_path)
+            self.NEAT.setup(current_path_copy)
         return output_data, genome_processed
 
     def reset(self):
+        print("reset!")
+        print("Sonic's reward: {}".format(self.current_fitness))
         self.NEAT.apply_reward(self.current_fitness)
         self.current_fitness = 0.0
         self.active_reward_fitness = 0.0
@@ -366,6 +395,7 @@ class bebna:
         self.observation_hashes = {}
         self.num_unique_frames = 0
         self.NEAT.extra_frames_earned = 0
+        self.NEAT.previous_path = copy.deepcopy(self.NEAT.previous_path_master)
 
     def add_observation(self, obs, temp_hash, info, f):
         ## Update the actuator model given the previous output and the current
@@ -489,24 +519,27 @@ class bebna:
             #self.puzzle_solver_model = tf.keras.models.load_model('models/puzzle_model.h5')
             #self.decoder_eval_model = tf.keras.models.load_model('models/decoder_eval_model.h5')
 
+            print(self.encoder_frozen_model.summary())
+
         except:
             input('...')
             self.encoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
                     )
-            self.encoder_convolution_0 = tf.keras.layers.Conv2D(16,kernel_size=(4, 4),strides=(4,4), padding='valid')(self.encoder_input)
-            self.encoder_convolution_1 = tf.keras.layers.Conv2D(32,
+            self.encoder_convolution_0 = tf.keras.layers.Conv2D(64,
+                    kernel_size=(4, 4),strides=(4,4), padding='valid')(self.encoder_input)
+            self.encoder_convolution_1 = tf.keras.layers.Conv2D(128,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.encoder_convolution_0)
-            self.encoder_convolution_2 = tf.keras.layers.Conv2D(64,
+            self.encoder_convolution_2 = tf.keras.layers.Conv2D(256,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.encoder_convolution_1)
-            self.encoder_convolution_3 = tf.keras.layers.Conv2D(128,
+            self.encoder_convolution_3 = tf.keras.layers.Conv2D(8,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.encoder_convolution_2)
-            self.encoder_flat = tf.keras.layers.Flatten()(
+            self.encoder_encoding_layer = tf.keras.layers.Flatten()(
                     self.encoder_convolution_3)
-            self.encoder_encoding_layer = tf.keras.layers.Dense(self.encoding_layer_depth,
-                    )(self.encoder_flat)
+            #self.encoder_encoding_layer = tf.keras.layers.Dense(256,
+            #        )(self.encoder_flat)
             self.encoder_model = tf.keras.models.Model(
                     self.encoder_input, self.encoder_encoding_layer)
 
@@ -542,20 +575,18 @@ class bebna:
             ## decoder by itself. Probably not something we need but it is
             ## there anyways.
             ##self.decoder_input = tf.layers.Input(128, name="decoder_input")
-            self.decoder_decoding_layer = tf.keras.layers.Dense(
-                    8960)(self.decoder_encoder_layer)
             self.decoder_reshaped = tf.keras.layers.Reshape(
-                    target_shape=(7, 10, 128))(self.decoder_decoding_layer)
-            self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(256,
+                    target_shape=(7, 10, 8))(self.decoder_encoder_layer)
+            self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(2048,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_reshaped)
-            self.decoder_deconvolution_1_2 = tf.keras.layers.Conv2DTranspose(256,
+            self.decoder_deconvolution_1_2 = tf.keras.layers.Conv2DTranspose(1024,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_reshaped)
-            self.decoder_deconvolution_2 = tf.keras.layers.Conv2DTranspose(128,
+            self.decoder_deconvolution_2 = tf.keras.layers.Conv2DTranspose(512,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_deconvolution_1)
-            self.decoder_deconvolution_2_2 = tf.keras.layers.Conv2DTranspose(128,
+            self.decoder_deconvolution_2_2 = tf.keras.layers.Conv2DTranspose(256,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_deconvolution_1_2)
             self.decoder_tower_output = tf.keras.layers.concatenate([self.decoder_deconvolution_2, self.decoder_deconvolution_2_2])
@@ -592,7 +623,7 @@ class bebna:
 
 
             ## For looking at decoder output.
-            self.decoder_decoding_layer.trainable = False
+            #self.decoder_decoding_layer.trainable = False
             self.decoder_reshaped.trainable = False
             self.decoder_deconvolution_1.trainable = False
             self.decoder_deconvolution_2.trainable = False
@@ -740,7 +771,12 @@ class MapTracker:
         self.keystone_image = keystone_image
         self.current_x_y_coords = (0.0, 0.0)
         self.reward_for_pixel = 10.0
-        self.pixels_seen = np.zeros(shape=(10001,10001), dtype=int)
+        ## First channel is for checking for new pixels. Second channel is for dealing with checking
+        ## to see if it is time to start a new population.
+        self.pixels_seen = np.zeros(shape=(10001,10001,2), dtype=int)
+        self.last_reward = 0
+        self.world_reward = 0.0
+        self.frames_in_old_area = 0
 
         self.image_height = image_height
         self.image_width = image_width
@@ -748,63 +784,135 @@ class MapTracker:
         #print(image_height+10000 // 2)
         for i in range(image_height // 2):
             for j in range(image_width // 2):
-                self.pixels_seen[j + 5000][i + 5000] = 1
-                self.pixels_seen[-j + 5000][i + 5000] = 1
-                self.pixels_seen[j + 5000][-i + 5000] = 1
-                self.pixels_seen[j + 5000][i + 5000] = 1
+                self.pixels_seen[j + 5000][i + 5000][0] = 10
+                self.pixels_seen[-j + 5000][i + 5000][0] = 10
+                self.pixels_seen[j + 5000][-i + 5000][0] = 10
+                self.pixels_seen[j + 5000][i + 5000][0] = 10
 
 
     def reset(self):
+        print('Last reward: {}.'.format(self.world_reward))
+        if self.world_reward > 8000:
+            input('WE DID IT!...')
+
+        self.last_reward = 0
         self.keystone_image = None
         self.current_x_y_coords = (0.0, 0.0)
         self.pixels_seen.fill(0)
+        self.world_reward = 0.0
+        self.frames_in_old_area = 0
         for i in range(self.image_height// 2):
             for j in range(self.image_width // 2):
-                self.pixels_seen[j + 5000][i + 5000] = 1
-                self.pixels_seen[-j + 5000][i + 5000] = 1
-                self.pixels_seen[j + 5000][-i + 5000] = 1
-                self.pixels_seen[j + 5000][i + 5000] = 1
+                self.pixels_seen[j + 5000][i + 5000][0] = 10
+                self.pixels_seen[-j + 5000][i + 5000][0] = 10
+                self.pixels_seen[j + 5000][-i + 5000][0] = 10
+                self.pixels_seen[j + 5000][i + 5000][0] = 10
 
-    def calculate_reward(self, last_img, new_img):
+    def calculate_reward(self, last_img, new_img, world_reward, current_path, NEAT, processing_old_paths=False, info=None):
+        reward_changed = False
+        self.world_reward += world_reward
+        #print(self.world_reward)
+        if self.world_reward is not None:
+            if abs(self.world_reward - self.last_reward) > 9700:
+                ## This means that we might have progressed an interesting amount.
+                #input("Last reward: {}, Reward: {}...".format(self.last_reward, self.world_reward))
+                self.last_reward = self.world_reward
+                reward_changed = True
+        if self.keystone_image is None:
+            self.keystone_image = new_img
+
         ## Scale the images down.
         last_img_resized = cv2.resize(last_img, dsize=(self.image_width, self.image_height), interpolation=cv2.INTER_CUBIC)
         new_img_resized = cv2.resize(new_img, dsize=(self.image_width, self.image_height), interpolation=cv2.INTER_CUBIC)
-        self.save_image(last_img, "last_img")
-        self.save_image(new_img, "new_img")
+        #self.save_image(last_img, "last_img")
+        #self.save_image(new_img, "new_img")
         #input("...")
         if imagehash.whash(Image.fromarray(new_img_resized, mode='RGB')) == imagehash.whash(Image.fromarray(self.keystone_image, mode='RGB')):
             self.current_x_y_coords = (0.0, 0.0)
             new_x = 0
             new_y = 0
         else:
-            #print(last_img_resized.dtype, new_img_resized.dtype)
-            try:
-                transform_matrix = cv2.estimateRigidTransform(new_img.astype('uint8'), last_img.astype('uint8'), False)
-                #print(last_img_resized)
-                print(transform_matrix)
-                x_shift = transform_matrix[0][2]
-            except:
-                #input("... transform is none")
-                return 0.0
-            if x_shift < 1.0 and x_shift > -1.0:
-                x_shift = 0
-            y_shift = transform_matrix[1][2]
-            if y_shift < 1.0 and y_shift > -1.0:
-                y_shift = 0
-            new_x = self.current_x_y_coords[0] + x_shift
-            new_y = self.current_x_y_coords[1] + y_shift
+            if info is not None:
+                new_x = info['x']
+                new_y = info['y']
+            else:
+                #print(last_img_resized.dtype, new_img_resized.dtype)
+                try:
+                    transform_matrix = cv2.estimateRigidTransform(new_img.astype('uint8'), last_img.astype('uint8'), False)
+                    #print(last_img_resized)
+                    #print(transform_matrix)
+                    #x_shift = transform_matrix[0][2]
+                    x_shift = world_reward #/ 2.0
+                    y_shift = transform_matrix[1][2] #/ 2.0
+                except:
+                    #input("... transform is none")
+                    return 0.0, False
+                #if x_shift < 1.0 and x_shift > -1.0:
+                #    x_shift = 0
+                if y_shift < 1.0 and y_shift > -1.0:
+                    y_shift = 0
+                    
+                #if abs(y_shift) > 30:
+                #    print(y_shift)
+                #    return -300000.0, False
+                #    #input('y_shift...')
+                new_x = self.current_x_y_coords[0] + x_shift
+                new_y = self.current_x_y_coords[1] + y_shift
             self.current_x_y_coords = (new_x, new_y)
         x_shift_int = int(math.floor(new_x) - self.image_width / 2)
         y_shift_int = int(math.floor(new_y) - self.image_height / 2)
 
+
         reward = 0.0
+        in_old_area = False
+        in_new_area = False
         for i in range(self.image_height):
             for j in range(self.image_width):
-                self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int] += 1
-                reward += self.reward_for_pixel / self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int]
+                if processing_old_paths:
+                    self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0] += 1
+                    self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][1] = 1
+                    if self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0] > 200:
+                        print("Are we stuck? {}".format(self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0]))
+                        ## Set the new boundary here.
+                        current_path = current_path[:NEAT.path_position + 1]
+                        old_path_info = (current_path[-1][0], (self.current_x_y_coords[0], self.current_x_y_coords[1]))
+                        current_path[-1] = copy.deepcopy(old_path_info)
+                        NEAT.previous_path = NEAT.previous_path[:1]
+                        NEAT.previous_path[0] = copy.deepcopy(old_path_info)
+                        NEAT.previous_path_master = NEAT.previous_path_master[:NEAT.path_position + 1]
+                        NEAT.previous_path_master[-1] = copy.deepcopy(old_path_info)
+                    self.last_reward = self.world_reward
+                    #input('...')
+                else:
+                    self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0] += 1
+                    if self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][1] == 1:
+                        #input('...')
+                        self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0] += 15000
+                        in_old_area = True
+                        self.frames_in_old_area += 1
+                    else:
+                        in_new_area = True
+                        reward += self.reward_for_pixel / self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0]
+        if self.frames_in_old_area > 60:
+            reward -= 500
+        print("Reward: {}.".format(reward))
+        #print(x_shift_int, y_shift_int)
 
-        print("X shift: {}, Y shift: {}".format(self.current_x_y_coords[0], self.current_x_y_coords[1]))
-        return reward
+        new_problem_completed = False
+        if not processing_old_paths and not in_old_area and reward_changed:
+            #input('{}, {}...'.format(self.last_reward, world_reward))
+            ## We are learning a new network(not replaying an old one), we don't see any of the old parts of the map,
+            ## and we found a reward change area. Therefore we have probably solved part of the problem and should
+            ## move on to try and solve a new part.
+
+            ## This means that we need to stop learning on the current population and start a new one.
+            ## Add the current genome to the list of path genomes.
+            input("Last reward: {}. Current reward: {}.".format(self.last_reward, self.world_reward))
+            self.last_reward = self.world_reward
+            new_problem_completed = True
+
+        #print("X shift: {}, Y shift: {}".format(self.current_x_y_coords[0], self.current_x_y_coords[1]))
+        return reward, new_problem_completed
 
 
     def save_image(self, data, hash):
@@ -839,28 +947,33 @@ def main():
             ('SonicAndKnuckles3-Genesis','MarbleGardenZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','MushroomHillZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','SandopolisZone.Act',('1','2'))]
-
+    info = None
     for j in envs:
         for k in range(len(j[2])):
-            env = make(game='SonicAndKnuckles3-Genesis', state='SandopolisZone.Act2')
+            env = make(game='SonicTheHedgehog-Genesis', state='GreenHillZone.Act1')
 
             model = bebna()
             model.setup(env)
             obs = env.reset()
             done = False
             #while not done:
+            reward = 0.0
             while True:
-                action, genome_processed = model.process_data(obs)
+                action, genome_processed = model.process_data(obs, reward=reward, info=info)
                 #obs, rew, done, info = env.step(env.action_space.sample())
-                obs, rew, done, info = env.step(action)
-                print(info)
+                obs, reward, done, info = env.step(action)
+                #print('reward: {}'.format(reward))
+                #print(info)
                 #print('Info: {}'.format(info))
                 #model.animate_data(obs, obs)
                 env.render()
+                #if done:
+                #    model.reset()
                 if done or genome_processed:
                     obs = env.reset()
                     model.NEAT.extra_frames_earned = 0
-                    model.reset()
+                    info = None
+                    #model.reset()
 
 
 if __name__ == '__main__':

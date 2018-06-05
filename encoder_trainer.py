@@ -166,23 +166,24 @@ class bebna_encoder:
         with self.session as sess:
             self.encoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
                     )
-            self.encoder_convolution_0 = tf.keras.layers.Conv2D(16,kernel_size=(4, 4),strides=(4,4), padding='valid')(self.encoder_input)
-            self.encoder_convolution_1 = tf.keras.layers.Conv2D(32,
+            self.encoder_convolution_0 = tf.keras.layers.Conv2D(64,
+                    kernel_size=(4, 4),strides=(4,4), padding='valid')(self.encoder_input)
+            self.encoder_convolution_1 = tf.keras.layers.Conv2D(128,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.encoder_convolution_0)
-            self.encoder_convolution_2 = tf.keras.layers.Conv2D(64,
+            self.encoder_convolution_2 = tf.keras.layers.Conv2D(256,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.encoder_convolution_1)
-            self.encoder_convolution_3 = tf.keras.layers.Conv2D(128,
+            self.encoder_convolution_3 = tf.keras.layers.Conv2D(8,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.encoder_convolution_2)
-            self.encoder_flat = tf.keras.layers.Flatten()(
+            self.encoder_encoding_layer = tf.keras.layers.Flatten()(
                     self.encoder_convolution_3)
-            self.encoder_encoding_layer = tf.keras.layers.Dense(256,
-                    )(self.encoder_flat)
+            #self.encoder_encoding_layer = tf.keras.layers.Dense(256,
+            #        )(self.encoder_flat)
             self.encoder_model = tf.keras.models.Model(
                     self.encoder_input, self.encoder_encoding_layer)
-
+            
             ## Decoder
             ## The encoder segment should be trainable while we are training the
             ## autoencoder so we do not deactivate them here.
@@ -215,10 +216,10 @@ class bebna_encoder:
             ## decoder by itself. Probably not something we need but it is
             ## there anyways.
             ##self.decoder_input = tf.layers.Input(128, name="decoder_input")
-            self.decoder_decoding_layer = tf.keras.layers.Dense(
-                    8960)(self.decoder_encoder_layer)
+            #self.decoder_decoding_layer = tf.keras.layers.Dense(
+            #        8960)(self.decoder_encoder_layer)
             self.decoder_reshaped = tf.keras.layers.Reshape(
-                    target_shape=(7, 10, 128))(self.decoder_decoding_layer)
+                    target_shape=(7, 10, 8))(self.decoder_encoder_layer)
             self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(2048,
                     kernel_size=(2,2), strides=(2,2), padding='valid',
                     activation='relu')(self.decoder_reshaped)
@@ -264,7 +265,7 @@ class bebna_encoder:
             self.encoder_encoding_layer.trainable = False
 
             ## For looking at decoder output.
-            self.decoder_decoding_layer.trainable = False
+            #self.decoder_decoding_layer.trainable = False
             self.decoder_reshaped.trainable = False
             self.decoder_deconvolution_1.trainable = False
             self.decoder_deconvolution_2.trainable = False
