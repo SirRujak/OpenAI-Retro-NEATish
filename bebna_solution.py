@@ -436,7 +436,8 @@ class bebna:
             #print(self.encoder_frozen_model.summary())
 
         except:
-            input('...')
+            #input('...')
+            print("Error loading models.")
             self.encoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
                     )
             self.encoder_convolution_0 = tf.keras.layers.Conv2D(64,
@@ -838,7 +839,7 @@ class MapTracker:
         #NEAT.previous_path_master = NEAT.previous_path_master[:NEAT.path_position]
         #NEAT.previous_path_master[-1] = copy.deepcopy(old_path_info)
         #restart_population = True
-        input("Path length new: {}".format(len(current_path)))
+        #input("Path length new: {}".format(len(current_path)))
 
     def save_image(self, data, hash):
         img_to_save = Image.fromarray(data, mode='RGB')
