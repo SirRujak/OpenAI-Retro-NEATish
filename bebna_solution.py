@@ -233,7 +233,7 @@ class bebna:
             new_data[self.right_action] = True
             new_data[self.down_action] = True
         if data == self.down_train:
-            print('Oops, down...')
+            #print('Oops, down...')
             new_data[self.down_action] = True
         if data == self.down_b_train:
             new_data[self.down_action] = True
@@ -344,7 +344,7 @@ class bebna:
             if self.NEAT.generation_processed:
                 generation_processed = True
                 self.NEAT.process_new_generation()
-                print('Generation processed.')
+                #print('Generation processed.')
 
                 #input('Generation processed...')
 
@@ -395,8 +395,8 @@ class bebna:
         return output_data, genome_processed
 
     def reset(self):
-        print("reset!")
-        print("Sonic's reward: {}".format(self.current_fitness))
+        #print("reset!")
+        #print("Sonic's reward: {}".format(self.current_fitness))
         if self.current_fitness < 0.0:
             self.current_fitness = 0.0
         self.NEAT.apply_reward(self.current_fitness)
@@ -432,7 +432,7 @@ class bebna:
             #self.puzzle_solver_model = tf.keras.models.load_model('models/puzzle_model.h5')
             #self.decoder_eval_model = tf.keras.models.load_model('models/decoder_eval_model.h5')
 
-            print(self.encoder_frozen_model.summary())
+            #print(self.encoder_frozen_model.summary())
 
         except:
             input('...')
@@ -516,7 +516,7 @@ class bebna:
             self.decoder_model = tf.keras.models.Model([self.decoder_input],
                     [self.decoder_output])
             self.decoder_model.compile(optimizer='adam', loss='mse')
-            print(self.decoder_model.summary())
+            #print(self.decoder_model.summary())
 
             #self.puzzle_plus_decoder_model = tf.keras.models.Model(
             #        inputs=[self.decoder_input, self.puzzle_solver_input],
@@ -553,7 +553,7 @@ class bebna:
             #        inputs=[self.encoder_input],
             #        outputs=[self.encoder_encoding_layer])
 
-            print(self.encoder_model.summary())
+            #print(self.encoder_model.summary())
 
             #self.encoder_sgd = tf.keras.optimizers.SGD(lr=0.01, momentum=0.0,
             #        decay=0.0, nesterov=True)
@@ -704,9 +704,9 @@ class MapTracker:
 
 
     def reset(self):
-        print('Last reward: {}.'.format(self.world_reward))
-        if self.world_reward > 8000:
-            input('WE DID IT!...')
+        #print('Last reward: {}.'.format(self.world_reward))
+        #if self.world_reward > 8000:
+        #    input('WE DID IT!...')
 
         self.last_reward = 0
         self.keystone_image = None
@@ -825,8 +825,8 @@ class MapTracker:
         return reward, new_problem_completed, restart_population
 
     def unstick(self, current_path, NEAT):
-        print("Path old length: {}".format(len(current_path)))
-        print("Are we stuck?")
+        #print("Path old length: {}".format(len(current_path)))
+        #print("Are we stuck?")
 
         ## Set the new boundary here.
         current_path[:] = current_path[:NEAT.path_position + 1]

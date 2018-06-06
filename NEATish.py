@@ -1391,12 +1391,14 @@ class Population:
 
     def check_location(self, current_position=None):
         if len(self.previous_path) == 0:
+            '''
             try:
                 if self.start_printing_location:
                     print("Current frame: {}.".format(self.current_frame))
                     print("Frames to update: {}. Extra frames earned: {}.".format(self.frames_to_update, self.extra_frames_earned))
             except:
                 pass
+            '''
             if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
                 self.extra_frames_earned = 0
                 self.genome_processed = True
@@ -1430,7 +1432,7 @@ class Population:
                     self.path_position += 1
                     self.current_frame = 0
                     self.start_printing_location = True
-                    print("Moving on to new genome!")
+                    #print("Moving on to new genome!")
                     #input('...')
 
 
