@@ -5,10 +5,11 @@ import tensorflow as tf
 ##from tensorflow.keras.engine.topology import Layer
 ##from tensorflow.keras import backend as K
 
-from retro_contest.local import make
+#from retro_contest.local import make
 
 
 import gym_remote.exceptions as gre
+import gym_remote.client as grc
 
 #from hashlib import sha1
 import matplotlib.pyplot as plt
@@ -845,7 +846,7 @@ class MapTracker:
 
 
 def main():
-
+    '''
     envs = [('SonicTheHedgehog-Genesis','GreenHillZone.Act',('1','3')),
             ('SonicTheHedgehog-Genesis','LabyrinthZone.Act',('1','2','3')),
             ('SonicTheHedgehog-Genesis','MarbleZone.Act',('1','2','3')),
@@ -871,43 +872,44 @@ def main():
             ('SonicAndKnuckles3-Genesis','MarbleGardenZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','MushroomHillZone.Act',('1','2')),
             ('SonicAndKnuckles3-Genesis','SandopolisZone.Act',('1','2'))]
+    '''
     info = None
-    for j in envs:
-        for k in range(len(j[2])):
-            env = make(game='SonicTheHedgehog-Genesis', state='GreenHillZone.Act1')
+    print('connecting to remote environment')
+    env = grc.RemoteEnv('tmp/sock')
+    #env = make(game='SonicTheHedgehog-Genesis', state='GreenHillZone.Act1')
 
-            model = bebna()
-            model.setup(env)
+    model = bebna()
+    model.setup(env)
+    obs = env.reset()
+    done = False
+    #while not done:
+    reward = 0.0
+    while True:
+        action, genome_processed = model.process_data(obs, reward=reward, info=info)
+        #obs, rew, done, info = env.step(env.action_space.sample())
+        obs, reward, done, _ = env.step(action)
+        #print('reward: {}'.format(reward))
+        #print(info)
+        #print('Info: {}'.format(info))
+        #model.animate_data(obs, obs)
+        #env.render()
+        #if done:
+        #    model.reset()
+        #if model.population_done:
+        #    model.population_done = False
+        #    model.reset_population()
+        #    obs = env.reset()
+        #    model.NEAT.extra_frames_earned = 0
+        if done and model.processing_old_paths:
+            #input("Done...")
+            model.map_tracker.unstick(model.current_path, model.NEAT)
+            model.reset_population()
+            model.extra_frames_earned = 0
+        if done or genome_processed:
             obs = env.reset()
-            done = False
-            #while not done:
-            reward = 0.0
-            while True:
-                action, genome_processed = model.process_data(obs, reward=reward, info=info)
-                #obs, rew, done, info = env.step(env.action_space.sample())
-                obs, reward, done, info = env.step(action)
-                #print('reward: {}'.format(reward))
-                #print(info)
-                #print('Info: {}'.format(info))
-                #model.animate_data(obs, obs)
-                env.render()
-                #if done:
-                #    model.reset()
-                if model.population_done:
-                    model.population_done = False
-                    model.reset_population()
-                    obs = env.reset()
-                    model.NEAT.extra_frames_earned = 0
-                if done and model.processing_old_paths:
-                    #input("Done...")
-                    model.map_tracker.unstick(model.current_path, model.NEAT)
-                    model.reset_population()
-                    model.extra_frames_earned = 0
-                if done or genome_processed:
-                    obs = env.reset()
-                    model.NEAT.extra_frames_earned = 0
-                    info = None
-                    #model.reset()
+            model.NEAT.extra_frames_earned = 0
+            info = None
+            #model.reset()
 
 
 if __name__ == '__main__':
