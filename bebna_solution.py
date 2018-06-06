@@ -13,12 +13,12 @@ import gym_remote.client as grc
 
 #from hashlib import sha1
 #import matplotlib.pyplot as plt
+import math
+import cv2
 from PIL import Image
 import imagehash
 #import json
-import math
 
-import cv2
 
 import NEATish
 import copy
@@ -763,6 +763,14 @@ class MapTracker:
             self.current_x_y_coords = (new_x, new_y)
         x_shift_int = int(math.floor(new_x) - self.image_width / 2)
         y_shift_int = int(math.floor(new_y) - self.image_height / 2)
+        if x_shift_int > 4000:
+            x_shift_int = 4000
+        if x_shift_int < -4000:
+            x_shift_int = -4000
+        if y_shift_int > 4000:
+            y_shift_int = 4000
+        if y_shift_int < -4000:
+            y_shift_int = -4000
 
 
         reward = 0.0
