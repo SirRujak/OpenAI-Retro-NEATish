@@ -167,6 +167,9 @@ class bebna:
         self.current_path = []
 
         self.new_problem_completed = False
+        self.processing_old_paths = False
+
+        self.population_done = False
 
 
     def animate_data(self, screen_frame, predicted_frame):
@@ -241,6 +244,8 @@ class bebna:
 
     def process_data(self, obs, info=None, f=None, reward=None):
         genome_processed = False
+        generation_processed = False
+        restart_population = False
         if self.map_tracker.keystone_image is None:
             if self.keyframe_counter > 3:
                 self.map_tracker.keystone_image = obs
@@ -250,10 +255,11 @@ class bebna:
             temp_reward = 0
         else:
             if len(self.NEAT.previous_path) > 0:
-                processing_old_paths = True
+                self.processing_old_paths = True
             else:
-                processing_old_paths = False
-            temp_reward, new_problem_completed = self.map_tracker.calculate_reward(self.last_obs, obs, reward, self.current_path, self.NEAT, processing_old_paths, info)
+                self.processing_old_paths = False
+            temp_reward, new_problem_completed, restart_population = self.map_tracker.calculate_reward(self.last_obs, obs, reward, self.current_path, self.NEAT, self.processing_old_paths, info)
+            
             if new_problem_completed:
                 #genome_processed = True
                 self.new_problem_completed = True
@@ -278,14 +284,7 @@ class bebna:
         #print("np min",np.amin(encoded_frame))
 
 
-        ## Add this observation to the set of ones seen.
-        self.add_observation(obs, temp_hash, info, f)
-        if len(self.observation_hashes) > 0:
-            for hash in self.observation_hashes:
-                if temp_hash - hash < 16:
-                    ## We have seen a very similar screen before.
-                    temp_hash = hash
-                    break
+
 
         #last_img = self.observations[1]
         #current_image = self.observations[0]
@@ -339,7 +338,6 @@ class bebna:
             output = self.NEAT.process_data(encoded_frame[0])
             ## Check if we need to start a new generation.
             self.NEAT.check_location(self.map_tracker.current_x_y_coords)
-            generation_processed = False
             if self.NEAT.genome_processed:
                 genome_processed = True
                 self.reset()
@@ -347,6 +345,7 @@ class bebna:
                 generation_processed = True
                 self.NEAT.process_new_generation()
                 print('Generation processed.')
+
                 #input('Generation processed...')
 
 
@@ -376,17 +375,30 @@ class bebna:
         self.map_tracker.last_encoded_frame = encoded_frame
         if self.new_problem_completed and generation_processed:
             self.new_problem_completed = False
+            genome_processed = True
+            #if self.NEAT.best_genome is None:
+            #    print(self.NEAT.species_counter)
+            #    self.NEAT.best_genome = self.NEAT.species_list[self.NEAT.species_counter].genomes[self.NEAT.genome_counter]
             temp_genome = copy.deepcopy(self.NEAT.best_genome)
             old_path_info = (temp_genome, (self.NEAT.best_genome_end[0], self.NEAT.best_genome_end[1]))
             self.current_path.append(old_path_info)
             ## Need to reset the NEAT population and add on the current path data.
             current_path_copy = copy.deepcopy(self.current_path)
             self.NEAT.setup(current_path_copy)
+            self.population_done = True
+            #input("Adding new genome to path...")
+
+        if restart_population:
+            self.reset_population()
+            genome_processed = True
+            #generation_processed = True
         return output_data, genome_processed
 
     def reset(self):
         print("reset!")
         print("Sonic's reward: {}".format(self.current_fitness))
+        if self.current_fitness < 0.0:
+            self.current_fitness = 0.0
         self.NEAT.apply_reward(self.current_fitness)
         self.current_fitness = 0.0
         self.active_reward_fitness = 0.0
@@ -397,112 +409,13 @@ class bebna:
         self.NEAT.extra_frames_earned = 0
         self.NEAT.previous_path = copy.deepcopy(self.NEAT.previous_path_master)
 
-    def add_observation(self, obs, temp_hash, info, f):
-        ## Update the actuator model given the previous output and the current
-        ## screen.
-        self.num_observations += 1
-        np.roll(self.observations, 1)
-        np.copyto(self.observations[0], obs)
-        found_new, temp_index = self.new_observation_check(temp_hash, obs, info, f)
-        if found_new:
-            np.copyto(self.unique_observations[temp_index], obs)
-            #self.decoder_model.fit(self.unique_observations,
-            #        self.unique_observations, verbose=0)
-        elif self.num_observations < 16 :
-            ## Train the autoencoder with our unique observations.
-            np.roll(self.unique_observations, 1)
-            np.copyto(self.unique_observations[0], obs)
-            #self.decoder_model.fit(self.unique_observations,
-            #        self.unique_observations, epochs=2, verbose=0)
-        #self.decoder_model.fit(self.unique_observations,
-        #        self.unique_observations, epochs=2, verbose=0)
-        #self.animate_data(obs, self.decoder_eval_model.predict(np.expand_dims(obs, axis=0))[0].astype(int))
+    def reset_population(self):
+        self.reset()
+        self.NEAT.extra_frames_earned = 0
+        current_path_copy = copy.deepcopy(self.current_path)
+        self.NEAT.setup(current_path_copy)
 
 
-        temp_hash = self.last_hash
-        temp_action = np.array(self.convert_to_train_space(self.last_action))
-        if temp_hash in self.observation_hashes:
-            ##temp_action = 1 - temp_action
-            temp_index = np.argmax(temp_action)
-            new_action = np.zeros(10)
-            for i in self.opposites[temp_index]:
-                new_action[i] = 1
-            temp_action = new_action
-        ##print("last_action: {}".format(self.last_action))
-        ##print("last_train: {}".format(temp_action))
-        ##print("last_train shape: {}".format(temp_action.shape))
-        #self.actuator_model.fit(np.expand_dims(self.observations[1], axis=0), np.expand_dims(temp_action, axis=0),verbose=0)
-
-
-    def mse(self, index):
-        ## Use the frame in slot zero of self.observations and the index item
-        ## in self.unique_observations.
-        return ((self.observations[0] -
-               self.unique_observations[index]) ** 2).mean(axis=None)
-
-    def mse_first(self, index_1, index_2):
-        return ((self.unique_observations[index_1] -
-               self.unique_observations[index_2]) ** 2).mean(axis=None)
-
-
-    def new_observation_check(self, current_hash, obs, info, f):
-        ## Only check if we have seen 16 observations.
-        if self.num_observations > 16:
-            ## We need to check how different our observation is.
-            ## Keep track of the variation between all of them as we go.
-            ## If we run across at least one that has a lower total variation
-            ## then return the index of the lowest total variation and True.
-            ## TODO: Do this.
-            ## Check if it is a new observation. We don't need to check for old
-            ## ones.
-            if current_hash not in self.observation_hashes:
-                #self.save_image(obs, current_hash, info, f)
-                for i in range(16):
-                    self.uniqueness_check[i] = self.mse(i)
-                temp_uniqueness = np.sum(self.uniqueness_check)
-                current_min_uniqueness_index = np.argmin(self.uniqueness)
-                current_min_uniqueness = self.uniqueness[
-                        current_min_uniqueness_index]
-                if temp_uniqueness > current_min_uniqueness:
-                    ## We found one that is less unique than our current frame.
-                    ## Replace the uniquness value in the system minux the
-                    ## mse between the new and old frame.
-                    self.uniqueness[
-                            current_min_uniqueness_index] = temp_uniqueness - self.uniqueness_check[current_min_uniqueness_index]
-                    for i in range(16):
-                        ## Replace the difference values for each other frame.
-                        if i != current_min_uniqueness_index:
-                            self.similarity[i][current_min_uniqueness_index] = self.uniqueness_check[i]
-                    return(True, current_min_uniqueness_index)
-            return (False, 0)
-        else:
-            ## We should just put the new item in the unique_observations array.
-            if self.num_observations == 16:
-                ## We have now filled up the unique matrix. Calculate
-                ## the differences between each unique observationself.
-                for temp_key, temp_observation in enumerate(
-                        self.unique_observations):
-                    for i in range(temp_key, self.unique_observations.shape[0]):
-                        temp_similarity = self.mse_first(temp_key, i)
-                        self.similarity[temp_key][i] = temp_similarity
-                        self.similarity[i][temp_key] = temp_similarity
-                for i in range(16):
-                    self.uniqueness[i] = np.sum(self.similarity[i])
-            return (False, 0)
-
-    def check_for_uniqueness(self, obs):
-        for item in self.observations[-10:]:
-            if np.array_equal(obs, item):
-                return True
-        return False
-    '''
-    def uniqueness_loss(self, X_true, X_pred):
-        last_hash = self.last_hash
-        temp_loss = 0
-        if last_hash in self.observation_hashes:
-            temp_loss += 10.0 * self.observation_hashes[last_hash]
-        return tf.constant(temp_loss, dtype=float32)
-    '''
 
     def make_encoder_decoder(self):
         try:
@@ -810,10 +723,11 @@ class MapTracker:
 
     def calculate_reward(self, last_img, new_img, world_reward, current_path, NEAT, processing_old_paths=False, info=None):
         reward_changed = False
+        restart_population = False
         self.world_reward += world_reward
         #print(self.world_reward)
         if self.world_reward is not None:
-            if abs(self.world_reward - self.last_reward) > 9700:
+            if abs(self.world_reward - self.last_reward) > 500:
                 ## This means that we might have progressed an interesting amount.
                 #input("Last reward: {}, Reward: {}...".format(self.last_reward, self.world_reward))
                 self.last_reward = self.world_reward
@@ -833,8 +747,8 @@ class MapTracker:
             new_y = 0
         else:
             if info is not None:
-                new_x = info['x']
-                new_y = info['y']
+                new_x = info['x'] / 4
+                new_y = info['y'] / 4
             else:
                 #print(last_img_resized.dtype, new_img_resized.dtype)
                 try:
@@ -842,11 +756,11 @@ class MapTracker:
                     #print(last_img_resized)
                     #print(transform_matrix)
                     #x_shift = transform_matrix[0][2]
-                    x_shift = world_reward #/ 2.0
-                    y_shift = transform_matrix[1][2] #/ 2.0
+                    x_shift = world_reward / 4.0
+                    y_shift = transform_matrix[1][2] / 4.0
                 except:
                     #input("... transform is none")
-                    return 0.0, False
+                    return 0.0, False, restart_population
                 #if x_shift < 1.0 and x_shift > -1.0:
                 #    x_shift = 0
                 if y_shift < 1.0 and y_shift > -1.0:
@@ -866,21 +780,14 @@ class MapTracker:
         reward = 0.0
         in_old_area = False
         in_new_area = False
+        stuck = False
         for i in range(self.image_height):
             for j in range(self.image_width):
                 if processing_old_paths:
                     self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0] += 1
                     self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][1] = 1
                     if self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0] > 200:
-                        print("Are we stuck? {}".format(self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0]))
-                        ## Set the new boundary here.
-                        current_path = current_path[:NEAT.path_position + 1]
-                        old_path_info = (current_path[-1][0], (self.current_x_y_coords[0], self.current_x_y_coords[1]))
-                        current_path[-1] = copy.deepcopy(old_path_info)
-                        NEAT.previous_path = NEAT.previous_path[:1]
-                        NEAT.previous_path[0] = copy.deepcopy(old_path_info)
-                        NEAT.previous_path_master = NEAT.previous_path_master[:NEAT.path_position + 1]
-                        NEAT.previous_path_master[-1] = copy.deepcopy(old_path_info)
+                        stuck = True
                     self.last_reward = self.world_reward
                     #input('...')
                 else:
@@ -893,9 +800,12 @@ class MapTracker:
                     else:
                         in_new_area = True
                         reward += self.reward_for_pixel / self.pixels_seen[j + 5000 + x_shift_int][i + 5000 + y_shift_int][0]
-        if self.frames_in_old_area > 60:
+        if stuck:
+            self.unstick(current_path, NEAT)
+            restart_population = True
+        if self.frames_in_old_area > 15:
             reward -= 500
-        print("Reward: {}.".format(reward))
+        #print("Reward: {}.".format(reward))
         #print(x_shift_int, y_shift_int)
 
         new_problem_completed = False
@@ -907,13 +817,27 @@ class MapTracker:
 
             ## This means that we need to stop learning on the current population and start a new one.
             ## Add the current genome to the list of path genomes.
-            input("Last reward: {}. Current reward: {}.".format(self.last_reward, self.world_reward))
+            #input("Last reward: {}. Current reward: {}.".format(self.last_reward, self.world_reward))
             self.last_reward = self.world_reward
             new_problem_completed = True
 
         #print("X shift: {}, Y shift: {}".format(self.current_x_y_coords[0], self.current_x_y_coords[1]))
-        return reward, new_problem_completed
+        return reward, new_problem_completed, restart_population
 
+    def unstick(self, current_path, NEAT):
+        print("Path old length: {}".format(len(current_path)))
+        print("Are we stuck?")
+
+        ## Set the new boundary here.
+        current_path[:] = current_path[:NEAT.path_position + 1]
+        old_path_info = (current_path[-1][0], (self.current_x_y_coords[0], self.current_x_y_coords[1]))
+        current_path[-1] = copy.deepcopy(old_path_info)
+        #NEAT.previous_path = NEAT.previous_path[:1]
+        #NEAT.previous_path[0] = copy.deepcopy(old_path_info)
+        #NEAT.previous_path_master = NEAT.previous_path_master[:NEAT.path_position]
+        #NEAT.previous_path_master[-1] = copy.deepcopy(old_path_info)
+        #restart_population = True
+        input("Path length new: {}".format(len(current_path)))
 
     def save_image(self, data, hash):
         img_to_save = Image.fromarray(data, mode='RGB')
@@ -969,6 +893,16 @@ def main():
                 env.render()
                 #if done:
                 #    model.reset()
+                if model.population_done:
+                    model.population_done = False
+                    model.reset_population()
+                    obs = env.reset()
+                    model.NEAT.extra_frames_earned = 0
+                if done and model.processing_old_paths:
+                    #input("Done...")
+                    model.map_tracker.unstick(model.current_path, model.NEAT)
+                    model.reset_population()
+                    model.extra_frames_earned = 0
                 if done or genome_processed:
                     obs = env.reset()
                     model.NEAT.extra_frames_earned = 0
