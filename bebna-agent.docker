@@ -1,0 +1,16 @@
+FROM openai/retro-agent
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    libgtk2.0-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --upgrade pip
+RUN pip3 install -U Pillow
+RUN pip3 install ImageHash
+RUN pip3 install opencv-python
+RUN python3 --version
+ADD bebna_solution.py .
+ADD NEATish.py .
+ADD models ./models
+CMD python3 bebna_solution.py
+
