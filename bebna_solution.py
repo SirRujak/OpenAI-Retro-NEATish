@@ -12,10 +12,10 @@ import gym_remote.exceptions as gre
 import gym_remote.client as grc
 
 #from hashlib import sha1
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from PIL import Image
 import imagehash
-import json
+#import json
 import math
 
 import cv2
@@ -148,10 +148,10 @@ class bebna:
         self.img_height = 224
         self.img_width = 320
         self.double_height = 448
-        self.encoder_images = np.zeros((self.double_height, self.img_width, 3))
-        plt.ion()
-        self.fig, self.ax = plt.subplots(1,1)
-        self.image = self.ax.imshow(self.encoder_images[:, :, :], animated=True)
+        #self.encoder_images = np.zeros((self.double_height, self.img_width, 3))
+        #plt.ion()
+        #self.fig, self.ax = plt.subplots(1,1)
+        #self.image = self.ax.imshow(self.encoder_images[:, :, :], animated=True)
         #self.fig.canvas.draw()
 
         self.initial_exploration_index = 0
@@ -173,20 +173,6 @@ class bebna:
         self.population_done = False
 
 
-    def animate_data(self, screen_frame, predicted_frame):
-        #print(screen_frame[0][0][0], screen_frame[0][0][1], screen_frame[0][0][2])
-        #print(np.amax(screen_frame))
-        #screen_frame = screen_frame[:,:,::-1]
-        predicted_frame = predicted_frame[:,:,::-1]
-        ## Set top half of the encoder images to be the input frame.
-        self.encoder_images[:self.img_height,:,:] = screen_frame.astype(int)
-        self.encoder_images[self.img_height:, :,:] = screen_frame#predicted_frame
-        self.image.set_data(self.encoder_images[:,:,:])
-        #self.fig.canvas.draw()
-
-    def save_image(self, data, hash):
-        img_to_save = Image.fromarray(data, mode='RGB')
-        img_to_save.save('test/' + str(hash) + '.bmp')
 
 
     def convert_to_train_space(self, data):
@@ -840,10 +826,6 @@ class MapTracker:
         #NEAT.previous_path_master[-1] = copy.deepcopy(old_path_info)
         #restart_population = True
         #input("Path length new: {}".format(len(current_path)))
-
-    def save_image(self, data, hash):
-        img_to_save = Image.fromarray(data, mode='RGB')
-        img_to_save.save('test/' + str(hash) + '.bmp')
 
 
 def main():
