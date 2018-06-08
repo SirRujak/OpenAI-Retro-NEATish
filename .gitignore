@@ -1,9 +1,9 @@
-frames/
+frames/*
 _pycache_
 *.pyc
-test/
-.vscode/
+test/*
+.vscode/*
 models
-models.backup/
-models.old/
-models.train_backup/
+models.backup/*
+models.old/*
+models.train_backup/*
