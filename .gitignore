@@ -3,6 +3,7 @@ _pycache_
 *.pyc
 test/
 .vscode/
+models
 models.backup/
 models.old/
 models.train_backup/
