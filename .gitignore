@@ -1,4 +1,5 @@
 frames/*
+frames.old/*
 _pycache_
 *.pyc
 test/*
