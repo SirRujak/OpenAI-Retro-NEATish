@@ -5,14 +5,14 @@ import tensorflow as tf
 ##from tensorflow.keras.engine.topology import Layer
 ##from tensorflow.keras import backend as K
 
-#from retro_contest.local import make
+from retro_contest.local import make
 
 
 import gym_remote.exceptions as gre
 import gym_remote.client as grc
 
 #from hashlib import sha1
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import math
 import cv2
 from PIL import Image
@@ -22,6 +22,8 @@ import imagehash
 
 import NEATish
 import copy
+
+import asyncio
 
 
 
@@ -120,13 +122,13 @@ class bebna:
     def setup(self, env, observation_hashes=None):
         self.env = env
 
-        self.NEAT = NEATish.Population(self.encoding_layer_depth, self.num_learning_actions, 'fortytwo', 60, 30, 5, 5)
+        self.NEAT = NEATish.Population(self.encoding_layer_depth, self.num_learning_actions, 'fortytwo', 60, 250, 5, 5)
 
         self.last_action = self.env.action_space.sample()
         self.last_hash = None
         self.current_random_actions = 0
 
-        self.observations = np.zeros((16, 224, 320, 3))
+        self.observations = np.zeros((32, 224, 320, 3))
         self.num_observations = 0
         self.unique_observations = np.zeros((16,224,320, 3))
         ## How different the unique observations are to each other.
@@ -148,11 +150,12 @@ class bebna:
         self.img_height = 224
         self.img_width = 320
         self.double_height = 448
-        #self.encoder_images = np.zeros((self.double_height, self.img_width, 3))
-        #plt.ion()
-        #self.fig, self.ax = plt.subplots(1,1)
-        #self.image = self.ax.imshow(self.encoder_images[:, :, :], animated=True)
-        #self.fig.canvas.draw()
+        self.encoder_images = np.zeros((self.double_height, self.img_width, 3))
+        plt.ion()
+        self.plot_title = plt.title("Encoding_Figure")
+        self.fig, self.ax = plt.subplots(1,1)
+        self.image = self.ax.imshow(self.encoder_images[:, :, :], animated=True)
+        self.fig.canvas.draw()
 
         self.initial_exploration_index = 0
         self.initial_exploration_counter = 0
@@ -171,6 +174,11 @@ class bebna:
         self.processing_old_paths = False
 
         self.population_done = False
+
+        self.observations_added = False
+        self.current_observation = 0
+
+        self.encoded_frames = []
 
 
 
@@ -262,11 +270,12 @@ class bebna:
         ## on to actually predicting data.
 
         ## First, encode the frame.
-        encoded_frame = self.encoder_frozen_model.predict(np.expand_dims(obs, axis=0))
+        encoded_frame = self.encoder_model.predict(np.expand_dims(obs, axis=0))
         encoded_frame *= (1.0/1000.0)
         if self.map_tracker.last_encoded_frame is None:
             self.map_tracker.last_encoded_frame = encoded_frame
         self.map_tracker.encoded_frame = encoded_frame
+        ##print(self.map_tracker.last_encoded_frame - self.map_tracker.encoded_frame)
         #print("np max",np.amax(encoded_frame))
         #print("np min",np.amin(encoded_frame))
 
@@ -280,9 +289,11 @@ class bebna:
         self.active_reward_fitness += temp_reward
 
         #print("Total reward: {}".format(self.current_fitness))
-        if self.active_reward_fitness > 100000.0:
-            self.NEAT.extra_frames_earned += (self.active_reward_fitness // 100000) * 8
-            self.active_reward_fitness %= 100000.0
+        current_drop = math.log(self.NEAT.current_generation + 1) / 100.0
+        temp_fitness_check = 100000.0 / (current_drop + 1.0) + 1
+        if self.active_reward_fitness > temp_fitness_check:
+            self.NEAT.extra_frames_earned += (self.active_reward_fitness // temp_fitness_check) * 8
+            self.active_reward_fitness %= temp_fitness_check
             #print("Nuber frames added: {}".format(self.NEAT.extra_frames_earned))
 
 
@@ -359,6 +370,8 @@ class bebna:
         self.last_action = output_data
         self.last_hash = temp_hash
         self.last_obs = obs
+        self.add_observation()
+        ##self.train_auto_encoder()
         self.map_tracker.last_encoded_frame = encoded_frame
         if self.new_problem_completed and generation_processed:
             self.new_problem_completed = False
@@ -380,6 +393,56 @@ class bebna:
             genome_processed = True
             #generation_processed = True
         return output_data, genome_processed
+
+    def train_auto_encoder(self):
+        ## Only using each pair every other set of calculations should be fine.
+        ## Each should get eight runs still and this way you don't have the same
+        ## pairs every time, just every other.
+        #self.add_observation()
+        inputs = self.observations[0::2]## the last 16 frames, paired off temporally
+        outputs = self.observations[1::2]## the last 16 frames, paired off temporally
+        zero_input = np.zeros((16,560))
+        self.training_model.train_on_batch([inputs, inputs, zero_input], [inputs, inputs, zero_input])
+        ##self.add_observation()
+        #input()
+
+    def add_observation(self):
+        
+        if self.current_observation < 32:
+            np.roll(self.observations, 1, axis=0)
+            self.observations[0] = self.last_obs
+            self.current_observation += 1
+        else:
+            self.current_observation = 0
+            self.train_auto_encoder()
+
+        
+
+        
+        predicted_frames = self.visualization_model.predict(np.expand_dims(self.observations[0], axis=0))
+       
+        self.animate_data(self.observations[0], predicted_frames[0])
+        '''
+        if not self.observations_added:
+            for i in range(32):
+                self.observations[i] = self.last_obs
+            self.observations_added = True
+        else:
+            np.roll(self.observations, 1, axis=0)
+            self.observations[0] = self.last_obs
+        '''
+        
+
+    def animate_data(self, screen_frame, predicted_frame):
+        #print(screen_frame[0][0][0], screen_frame[0][0][1], screen_frame[0][0][2])
+        #print(np.amax(screen_frame))
+        #screen_frame = screen_frame[:,:,::-1]
+        #predicted_frame = predicted_frame[:,:,::-1]
+        ## Set top half of the encoder images to be the input frame.
+        self.encoder_images[:self.img_height,:,:] = screen_frame
+        self.encoder_images[self.img_height:, :,:] = predicted_frame
+        self.image.set_data(self.encoder_images[:,:,:])
+        self.fig.canvas.draw()
 
     def reset(self):
         #print("reset!")
@@ -408,13 +471,13 @@ class bebna:
         try:
             #self.encoder_model = tf.keras.models.load_model('models/encoder_model')
             self.encoder_frozen_model = tf.keras.models.load_model('models/encoder_model.h5')
-            for layer in self.encoder_frozen_model.layers:
-                layer.trainable=False
+            #for layer in self.encoder_frozen_model.layers:
+            #    layer.trainable=False
 
             #self.decoder_model = tf.keras.models.load_model('models/decoder_model')
             self.decoder_frozen_model = tf.keras.models.load_model('models/decoder_model.h5')
-            for layer in self.decoder_frozen_model.layers:
-                layer.trainable=False
+            #for layer in self.decoder_frozen_model.layers:
+            #    layer.trainable=False
 
             #self.puzzle_solver_model = tf.keras.models.load_model('models/puzzle_model.h5')
             #self.decoder_eval_model = tf.keras.models.load_model('models/decoder_eval_model.h5')
@@ -444,6 +507,57 @@ class bebna:
             self.encoder_model = tf.keras.models.Model(
                     self.encoder_input, self.encoder_encoding_layer)
 
+            self.image_1_input = tf.keras.layers.Input(shape=(224, 320, 3,))
+            self.encoded_image_1 = self.encoder_model(self.image_1_input)
+            self.image_2_input = tf.keras.layers.Input(shape=(224, 320, 3,))
+            self.encoded_image_2 = self.encoder_model(self.image_2_input)
+
+            self.zero_layer = tf.keras.layers.Input(shape=(560,))
+            self.encoded_image_2_negated = tf.keras.layers.Lambda(lambda x: -x)(self.encoded_image_2)
+            self.encoded_difference = tf.keras.layers.Add()([self.encoded_image_1, self.encoded_image_2_negated])
+            ##self.encoded_absolute_difference = tf.keras.backend.abs(self.encoded_difference)
+
+            self.decoder_input = tf.keras.layers.Input(shape=(560,),
+                    name='decoder_encoder_input')
+            self.decoder_reshaped = tf.keras.layers.Reshape(
+                    target_shape=(7, 10, 8))(self.decoder_input)
+            self.decoder_deconvolution_1 = tf.keras.layers.Conv2DTranspose(2048,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_reshaped)
+            self.decoder_deconvolution_1_2 = tf.keras.layers.Conv2DTranspose(1024,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_reshaped)
+            self.decoder_deconvolution_2 = tf.keras.layers.Conv2DTranspose(512,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_deconvolution_1)
+            self.decoder_deconvolution_2_2 = tf.keras.layers.Conv2DTranspose(256,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_deconvolution_1_2)
+            self.decoder_tower_output = tf.keras.layers.concatenate([self.decoder_deconvolution_2, self.decoder_deconvolution_2_2])
+            self.decoder_deconvolution_3 = tf.keras.layers.Conv2DTranspose(128,
+                    kernel_size=(2,2), strides=(2,2), padding='valid',
+                    activation='relu')(self.decoder_tower_output)
+            self.decoder_output = tf.keras.layers.Conv2DTranspose(3,
+                    kernel_size=(4,4), strides=(4,4), padding='valid',
+                    activation='sigmoid',
+                    name="decoder_output")(self.decoder_deconvolution_3)
+
+            self.decoder_model = tf.keras.models.Model([self.decoder_input],
+                    [self.decoder_output])
+
+
+            self.visualization_input = tf.keras.layers.Input(shape=(224, 320, 3,))
+            self.visualization_encoded = self.encoder_model(self.visualization_input)
+            self.visualization_output = self.decoder_model(self.visualization_encoded)
+            self.visualization_model = tf.keras.models.Model(self.visualization_input, self.visualization_output)
+            self.visualization_model.compile(optimizer="adam", loss="mse")
+
+            
+            self.image_1_decoded = self.decoder_model(self.encoded_image_1)
+            self.image_2_decoded = self.decoder_model(self.encoded_image_2)
+            self.training_model = tf.keras.models.Model([self.image_1_input, self.image_2_input, self.zero_layer],
+                    [self.image_1_decoded, self.image_2_decoded, self.encoded_difference])
+            self.training_model.compile(optimizer="adam", loss="mse", loss_weights=[0.3, 0.3, 0.3])
             ## Decoder
             ## The encoder segment should be trainable while we are training the
             ## autoencoder so we do not deactivate them here.
@@ -454,23 +568,13 @@ class bebna:
             ## Make a list from zero to 3.
             ## Randomly shuffle that list.
 
+            '''
             self.decoder_sgd = tf.keras.optimizers.SGD(lr=0.1, momentum=0.1,
                     decay=0.1)
 
-            self.puzzle_solver_input = tf.keras.layers.Input(shape=(224, 320, 3,),
-                    name='puzzle_encoder_input')
-            self.decoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
-                    name='decoder_encoder_input')
-            self.puzzle_encoder_layer = self.encoder_model(self.puzzle_solver_input)
+            #self.decoder_input = tf.keras.layers.Input(shape=(224, 320, 3,),
+            #        name='decoder_encoder_input')
             self.decoder_encoder_layer = self.encoder_model(self.decoder_input)
-
-            self.puzzle_solver_layer_1 = tf.keras.layers.Dense(64)(self.puzzle_encoder_layer)
-            self.puzzle_solver_layer_2 = tf.keras.layers.Dense(32)(self.puzzle_solver_layer_1)
-            self.puzzle_solver_layer_3 = tf.keras.layers.Dense(24)(self.puzzle_solver_layer_2)
-            self.puzzle_solver_output = tf.keras.layers.Dense(24, name='puzzle_output')(self.puzzle_solver_layer_3)
-            self.puzzle_solver_model = tf.keras.models.Model(self.puzzle_solver_input, self.puzzle_solver_output)
-            self.puzzle_solver_model.compile(optimizer='adam',loss={'puzzle_output':'categorical_crossentropy'})
-
 
             ## This next line is used if we ever want to be able to run the
             ## decoder by itself. Probably not something we need but it is
@@ -501,9 +605,11 @@ class bebna:
             #self.decoder_dense_output = tf.keras.layers.Dense(215040, activation='sigmoid')(self.decoder_deconvolution_2)
             #self.decoder_output = tf.keras.layers.Reshape(target_shape=(224, 320, 3),name="decoder_output")(self.decoder_dense_output)
 
-            self.decoder_model = tf.keras.models.Model([self.decoder_input],
-                    [self.decoder_output])
-            self.decoder_model.compile(optimizer='adam', loss='mse')
+            self.decoder_model = tf.keras.models.Model([self.decoder_input, self.zero_layer],
+                    [self.decoder_output, self.encoded_absolute_difference])
+
+            self.two_tower_decoder_model = tf.keras.models.Model
+            self.decoder_model.compile(optimizer='adam', loss='mse', loss_weights=[0.5, 0.5])
             #print(self.decoder_model.summary())
 
             #self.puzzle_plus_decoder_model = tf.keras.models.Model(
@@ -545,6 +651,7 @@ class bebna:
 
             #self.encoder_sgd = tf.keras.optimizers.SGD(lr=0.01, momentum=0.0,
             #        decay=0.0, nesterov=True)
+            '''
             self.encoder_model.compile(optimizer='adam', loss='mse')
 
 
@@ -695,7 +802,6 @@ class MapTracker:
         #print('Last reward: {}.'.format(self.world_reward))
         #if self.world_reward > 8000:
         #    input('WE DID IT!...')
-
         self.last_reward = 0
         self.keystone_image = None
         self.current_x_y_coords = (0.0, 0.0)
@@ -815,7 +921,7 @@ class MapTracker:
             ## Add the current genome to the list of path genomes.
             #input("Last reward: {}. Current reward: {}.".format(self.last_reward, self.world_reward))
             self.last_reward = self.world_reward
-            new_problem_completed = True
+            #new_problem_completed = True
 
         #print("X shift: {}, Y shift: {}".format(self.current_x_y_coords[0], self.current_x_y_coords[1]))
         return reward, new_problem_completed, restart_population
@@ -866,8 +972,8 @@ def main():
     '''
     info = None
     print('connecting to remote environment')
-    env = grc.RemoteEnv('tmp/sock')
-    #env = make(game='SonicTheHedgehog-Genesis', state='GreenHillZone.Act1')
+    #env = grc.RemoteEnv('tmp/sock')
+    env = make(game='SonicTheHedgehog-Genesis', state='GreenHillZone.Act1')
 
     model = bebna()
     model.setup(env)
@@ -876,14 +982,19 @@ def main():
     #while not done:
     reward = 0.0
     while True:
+        obs = np.divide(obs, 255.0)
+        #print(obs)
+        #input()
+        np.roll(obs, 1, axis=-1)
         action, genome_processed = model.process_data(obs, reward=reward, info=info)
         #obs, rew, done, info = env.step(env.action_space.sample())
-        obs, reward, done, _ = env.step(action)
+        obs, reward, done, info = env.step(action)
+
         #print('reward: {}'.format(reward))
         #print(info)
         #print('Info: {}'.format(info))
         #model.animate_data(obs, obs)
-        #env.render()
+        env.render()
         #if done:
         #    model.reset()
         #if model.population_done:
@@ -898,6 +1009,8 @@ def main():
             model.extra_frames_earned = 0
         if done or genome_processed:
             obs = env.reset()
+            model.observations_added = False
+            ##model.current_observation = 0
             model.NEAT.extra_frames_earned = 0
             info = None
             #model.reset()
