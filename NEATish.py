@@ -1163,7 +1163,7 @@ class Population:
         new_species_list = []
 
         for species_key, species in enumerate(self.species_list):
-            percent_allocated = float(species.adjusted_fitness_sum) / float(total_adjusted_fitness)
+            percent_allocated = float(species.adjusted_fitness_sum) / (float(total_adjusted_fitness) + 0.0000001) 
             genomes_allocated = math.floor(percent_allocated * self.population_size)
             #print(percent_allocated, genomes_allocated)
             #input("percent and genomes allocated")
@@ -1399,7 +1399,12 @@ class Population:
             except:
                 pass
             '''
-            if self.current_frame >= self.frames_to_update + self.extra_frames_earned - 1:
+            temp_frames_earned = self.extra_frames_earned * self.current_generation
+            '''
+            if self.current_generation > 7:
+                self.extra_frames_earned = self.current_frame
+            '''
+            if self.current_frame >= self.frames_to_update + temp_frames_earned - 1:
                 self.extra_frames_earned = 0
                 self.genome_processed = True
                 if len(self.previous_path_master) > 0:
