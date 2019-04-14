@@ -338,6 +338,7 @@ class bebna:
             self.NEAT.check_location(self.map_tracker.current_x_y_coords)
             if self.NEAT.genome_processed:
                 genome_processed = True
+                "test 1"
                 self.reset()
             if self.NEAT.generation_processed:
                 generation_processed = True
@@ -374,6 +375,7 @@ class bebna:
         ##self.train_auto_encoder()
         self.map_tracker.last_encoded_frame = encoded_frame
         if self.new_problem_completed and generation_processed:
+            print("new_problem_completed and generation_processed are True!")
             self.new_problem_completed = False
             genome_processed = True
             #if self.NEAT.best_genome is None:
@@ -461,6 +463,7 @@ class bebna:
 
     def reset_population(self):
         self.reset()
+        print("Reset population!")
         self.NEAT.extra_frames_earned = 0
         current_path_copy = copy.deepcopy(self.current_path)
         self.NEAT.setup(current_path_copy)
@@ -674,32 +677,10 @@ class bebna:
 
 
         ## Actuator code.
-        ## Use NEAT rather than tensorflow for this.
-        '''
-        self.actuator_input = tf.keras.layers.Input(shape=(224, 320, 3,),
-                name='actuator_input')
-        self.actuator_encoded = self.encoder_frozen_model(self.actuator_input)
-        self.actuator_dense_1 = tf.keras.layers.Dense(64)(
-                self.actuator_encoded)
-        self.actuator_dense_2 = tf.keras.layers.Dense(32)(
-                self.actuator_dense_1)
-        self.actuator_dense_3 = tf.keras.layers.Dense(16)(
-                self.actuator_dense_2)
-        self.actuator_output = tf.keras.layers.Dense(10,
-                name="actuator_output",
-                activation="softmax")(self.actuator_dense_3)
-        self.actuator_model = tf.keras.models.Model([self.actuator_input],
-                [self.actuator_output])
-
-        self.actuator_model.compile(optimizer='adam',
-                loss='categorical_crossentropy')
-        '''
-
         self.NEAT.setup()
 
 
         with self.session as sess:
-            #tf.initialize_all_variables().run()
             tf.global_variables_initializer().run()
 
 '''
@@ -905,8 +886,8 @@ class MapTracker:
         if stuck:
             self.unstick(current_path, NEAT)
             restart_population = True
-        if self.frames_in_old_area > 15:
-            reward -= 500
+        #if self.frames_in_old_area > 15:
+        #    reward -= 500
         #print("Reward: {}.".format(reward))
         #print(x_shift_int, y_shift_int)
 
@@ -1003,11 +984,14 @@ def main():
         #    obs = env.reset()
         #    model.NEAT.extra_frames_earned = 0
         if done and model.processing_old_paths:
-            #input("Done...")
+            input("Done...")
             model.map_tracker.unstick(model.current_path, model.NEAT)
             model.reset_population()
             model.extra_frames_earned = 0
         if done or genome_processed:
+            print("Resetting")
+            print("genome_processed: {}, done: {}".format(genome_processed, done))
+            
             obs = env.reset()
             model.observations_added = False
             ##model.current_observation = 0
