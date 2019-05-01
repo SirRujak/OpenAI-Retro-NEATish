@@ -1389,7 +1389,7 @@ class Population:
             self.current_frame = 0
         '''
 
-    def check_location(self, current_position=None):
+    def check_location(self, current_position=None, external_genome_processed=False):
         if len(self.previous_path) == 0:
             '''
             try:
@@ -1399,14 +1399,22 @@ class Population:
             except:
                 pass
             '''
-            temp_frames_earned = self.extra_frames_earned * self.current_generation
+            if external_genome_processed:
+                temp_frames_earned = 0
+            else:
+                temp_frames_earned = self.extra_frames_earned * self.current_generation
             '''
             if self.current_generation > 7:
                 self.extra_frames_earned = self.current_frame
             '''
+            ##if self.current_generation > 0:
+            ##    print(temp_frames_earned)
             if self.current_frame >= self.frames_to_update + temp_frames_earned - 1:
                 self.extra_frames_earned = 0
                 self.genome_processed = True
+                ##if self.current_generation > 0:
+                ##    print("Current frame: {}. Total frames available: {}".format(self.current_frame, self.frames_to_update + temp_frames_earned - 1))
+                ##    input("genome processed...")
                 if len(self.previous_path_master) > 0:
                     self.previous_path = copy.deepcopy(self.previous_path_master)
                 self.path_position = 0
